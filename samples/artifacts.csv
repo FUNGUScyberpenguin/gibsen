@@ -1,0 +1,18 @@
+artifact,category,plane,timestamp,tactic,confidence,compromised,technique,notes,from,relation
+kettle-invoices.top,domain,network,2024-03-11T22:04:00Z,resource-development,confirmed,yes,,Registered four months before use and parked until the campaign.,,
+203.0.113.44,c2-server,network,2024-03-12T08:03:00Z,command-and-control,confirmed,yes,T1071.001,HTTPS beacon on 443 with a 60s jitter.,,
+Invoice_Q1_2024.xlsm,file,host,2024-03-12T07:41:00Z,initial-access,confirmed,yes,T1566.001,Macro-enabled workbook attached to the phishing lure.,,
+FIN-WS-014,workstation,host,2024-03-12T07:58:00Z,execution,confirmed,no,,Finance endpoint; patient zero.,Invoice_Q1_2024.xlsm,delivers
+powershell.exe,process,host,2024-03-12T07:58:00Z,execution,confirmed,no,T1059.001,Spawned by EXCEL.EXE with an encoded command.,FIN-WS-014,executes
+kettle.dll,executable,host,2024-03-12T07:59:00Z,execution,confirmed,yes,,Loader written to %APPDATA%.,powershell.exe,writes
+HKCU\Software\Microsoft\Windows\CurrentVersion\Run\KettleUpdate,registry-key,host,2024-03-12T08:03:00Z,persistence,confirmed,yes,T1547.001,Run key pointing at the loader.,kettle.dll,persists-via
+CORP\svc-backup,user-account,host,2024-03-12T09:15:00Z,credential-access,probable,yes,T1003.001,Recovered from an lsass dump; privileged in AD and on the DC.,,
+contoso-eng.onmicrosoft.com,cloud-tenant,cloud,2024-03-12T11:20:00Z,lateral-movement,confirmed,no,,Entra ID tenant reached with the harvested service credential.,CORP\svc-backup,authenticates-to
+Kettle Reporting,oauth-grant,cloud,2024-03-12T11:31:00Z,persistence,confirmed,yes,T1098.003,Rogue application consent against Microsoft Graph.,contoso-eng.onmicrosoft.com,persists-via
+kettle-drop-eu,cloud-storage,cloud,2024-03-12T13:47:00Z,collection,confirmed,yes,,Staging bucket for mailbox and SharePoint content.,Kettle Reporting,collects-from
+CORP-DC-01,server,host,2024-03-13T02:10:00Z,lateral-movement,confirmed,no,T1021.002,Reached over SMB with the service account.,CORP\svc-backup,moves-laterally-to
+ENG-WS-03,engineering-workstation,ot,2024-03-13T02:44:00Z,lateral-movement,probable,no,,Dual-homed between corporate and plant networks.,CORP-DC-01,moves-laterally-to
+PI-HIST-02,historian,ot,2024-03-13T04:35:00Z,discovery,probable,no,,Process historian queried for tag names.,ENG-WS-03,connects-to
+10.20.4.9,protocol-gateway,ot,2024-03-13T04:51:00Z,discovery,possible,no,,Modbus TCP gateway enumerated from the historian subnet.,PI-HIST-02,discovers
+PLC-LINE-2,plc,ot,2024-03-13T05:02:00Z,impact,probable,no,T0836,Setpoints modified outside the change window.,10.20.4.9,modifies
+198.51.100.77,ip-address,network,2024-03-13T06:30:00Z,exfiltration,confirmed,yes,T1567,Approximately 40 GB uploaded before the grant was revoked.,kettle-drop-eu,exfiltrates-to

@@ -1,0 +1,152 @@
+{
+  "type": "bundle",
+  "id": "bundle--0d1a6a2e-5f4b-4c8a-9b7e-2c1d3e4f5a6b",
+  "objects": [
+    {
+      "type": "intrusion-set",
+      "spec_version": "2.1",
+      "id": "intrusion-set--1a2b3c4d-0001-4000-8000-000000000001",
+      "created": "2024-03-11T20:00:00.000Z",
+      "name": "TIN KETTLE",
+      "description": "Fictional financially motivated actor used for GIBSEN Studio examples.",
+      "aliases": ["Kettle Group"]
+    },
+    {
+      "type": "malware",
+      "spec_version": "2.1",
+      "id": "malware--1a2b3c4d-0002-4000-8000-000000000002",
+      "created": "2024-03-12T08:00:00.000Z",
+      "name": "KettleLoader",
+      "is_family": false,
+      "malware_types": ["loader", "backdoor"],
+      "description": "DLL loader delivered by macro and persisted via a Run key."
+    },
+    {
+      "type": "domain-name",
+      "spec_version": "2.1",
+      "id": "domain-name--1a2b3c4d-0003-4000-8000-000000000003",
+      "value": "kettle-invoices.top"
+    },
+    {
+      "type": "ipv4-addr",
+      "spec_version": "2.1",
+      "id": "ipv4-addr--1a2b3c4d-0004-4000-8000-000000000004",
+      "value": "203.0.113.44"
+    },
+    {
+      "type": "file",
+      "spec_version": "2.1",
+      "id": "file--1a2b3c4d-0005-4000-8000-000000000005",
+      "name": "kettle.dll",
+      "hashes": {
+        "SHA-256": "9f2c4a1b8e7d6035f4a2b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8"
+      },
+      "size": 184320
+    },
+    {
+      "type": "email-addr",
+      "spec_version": "2.1",
+      "id": "email-addr--1a2b3c4d-0006-4000-8000-000000000006",
+      "value": "billing@kettle-invoices.top"
+    },
+    {
+      "type": "user-account",
+      "spec_version": "2.1",
+      "id": "user-account--1a2b3c4d-0007-4000-8000-000000000007",
+      "user_id": "CORP\\svc-backup",
+      "account_type": "windows-domain",
+      "is_privileged": true
+    },
+    {
+      "type": "infrastructure",
+      "spec_version": "2.1",
+      "id": "infrastructure--1a2b3c4d-0008-4000-8000-000000000008",
+      "created": "2024-03-11T22:04:00.000Z",
+      "name": "Kettle C2 node",
+      "infrastructure_types": ["command-and-control"],
+      "first_seen": "2024-03-12T08:03:00.000Z"
+    },
+    {
+      "type": "vulnerability",
+      "spec_version": "2.1",
+      "id": "vulnerability--1a2b3c4d-0009-4000-8000-000000000009",
+      "created": "2024-03-13T02:00:00.000Z",
+      "name": "Legacy SMB signing disabled",
+      "external_references": [{ "source_name": "cve", "external_id": "CVE-2024-00000" }]
+    },
+    {
+      "type": "attack-pattern",
+      "spec_version": "2.1",
+      "id": "attack-pattern--1a2b3c4d-0010-4000-8000-000000000010",
+      "name": "Spearphishing Attachment",
+      "external_references": [
+        { "source_name": "mitre-attack", "external_id": "T1566.001", "url": "https://attack.mitre.org/techniques/T1566/001" }
+      ]
+    },
+    {
+      "type": "indicator",
+      "spec_version": "2.1",
+      "id": "indicator--1a2b3c4d-0011-4000-8000-000000000011",
+      "created": "2024-03-12T07:58:00.000Z",
+      "valid_from": "2024-03-12T07:58:00.000Z",
+      "name": "Kettle staging URL",
+      "pattern_type": "stix",
+      "pattern": "[url:value = 'https://kettle-invoices.top/upd/kettle.dll']",
+      "description": "Loader retrieval URL observed in proxy logs."
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a2b3c4d-0101-4000-8000-000000000101",
+      "created": "2024-03-12T08:00:00.000Z",
+      "relationship_type": "resolves-to",
+      "source_ref": "domain-name--1a2b3c4d-0003-4000-8000-000000000003",
+      "target_ref": "ipv4-addr--1a2b3c4d-0004-4000-8000-000000000004"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a2b3c4d-0102-4000-8000-000000000102",
+      "created": "2024-03-12T07:41:00.000Z",
+      "relationship_type": "delivers",
+      "source_ref": "email-addr--1a2b3c4d-0006-4000-8000-000000000006",
+      "target_ref": "file--1a2b3c4d-0005-4000-8000-000000000005"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a2b3c4d-0103-4000-8000-000000000103",
+      "created": "2024-03-12T08:03:00.000Z",
+      "relationship_type": "beacons-to",
+      "source_ref": "malware--1a2b3c4d-0002-4000-8000-000000000002",
+      "target_ref": "infrastructure--1a2b3c4d-0008-4000-8000-000000000008"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a2b3c4d-0104-4000-8000-000000000104",
+      "created": "2024-03-12T07:41:00.000Z",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--1a2b3c4d-0001-4000-8000-000000000001",
+      "target_ref": "attack-pattern--1a2b3c4d-0010-4000-8000-000000000010"
+    },
+    {
+      "type": "relationship",
+      "spec_version": "2.1",
+      "id": "relationship--1a2b3c4d-0105-4000-8000-000000000105",
+      "created": "2024-03-13T02:10:00.000Z",
+      "relationship_type": "exploits",
+      "source_ref": "intrusion-set--1a2b3c4d-0001-4000-8000-000000000001",
+      "target_ref": "vulnerability--1a2b3c4d-0009-4000-8000-000000000009"
+    },
+    {
+      "type": "sighting",
+      "spec_version": "2.1",
+      "id": "sighting--1a2b3c4d-0201-4000-8000-000000000201",
+      "created": "2024-03-12T08:10:00.000Z",
+      "first_seen": "2024-03-12T08:03:00.000Z",
+      "count": 47,
+      "sighting_of_ref": "ipv4-addr--1a2b3c4d-0004-4000-8000-000000000004"
+    }
+  ]
+}

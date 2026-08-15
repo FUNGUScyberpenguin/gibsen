@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GIBSEN Studio — threat intelligence to incident diagrams</title>
+    <meta
+      name="description"
+      content="Upload cyber threat intelligence and get a time-driven GIBSEN incident diagram across the cloud, network, host and OT planes."
+    />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">◧</span>
+          <div>
+            <h1>GIBSEN Studio</h1>
+            <p class="brand-sub">Threat intelligence → incident diagram</p>
+          </div>
+        </div>
+
+        <div class="topbar-controls">
+          <label class="inline-field">
+            <span>Grouping</span>
+            <select id="granularity">
+              <option value="auto">Auto</option>
+              <option value="second">Second</option>
+              <option value="minute">Minute</option>
+              <option value="five-minutes">5 minutes</option>
+              <option value="fifteen-minutes">15 minutes</option>
+              <option value="hour">Hour</option>
+              <option value="six-hours">6 hours</option>
+              <option value="day">Day</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </select>
+          </label>
+
+          <div class="toggle-group">
+            <label class="checkbox"><input type="checkbox" id="toggle-legend" checked /><span>Legend</span></label>
+            <label class="checkbox"><input type="checkbox" id="toggle-edge-labels" checked /><span>Verbs</span></label>
+            <label class="checkbox"><input type="checkbox" id="toggle-empty-planes" /><span>All planes</span></label>
+          </div>
+
+          <button class="btn" id="btn-theme" title="Switch between the dark and light diagram palette">Light</button>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="btn" id="btn-fit" title="Fit the diagram to the window">Fit</button>
+          <div class="menu">
+            <button class="btn btn-primary" id="btn-export">Export ▾</button>
+            <div class="menu-list" id="export-menu" hidden>
+              <button data-export="svg">SVG (vector)</button>
+              <button data-export="png">PNG (2× raster)</button>
+              <button data-export="json">Incident JSON</button>
+              <button data-export="md">Markdown report</button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar" id="sidebar">
+          <section class="drop-zone" id="drop-zone">
+            <p class="drop-title">Drop threat intelligence here</p>
+            <p class="drop-sub">STIX 2.x · MISP · CSV/TSV · narrative reports · saved .gibsen.json</p>
+            <button class="btn btn-small" id="btn-browse">Choose files…</button>
+            <input type="file" id="file-input" multiple hidden accept=".json,.csv,.tsv,.txt,.md,.log,.stix" />
+          </section>
+
+          <section class="paste-block">
+            <label class="field">
+              <span class="field-label">…or paste intelligence</span>
+              <textarea id="paste-area" rows="5" placeholder="Paste a report, a STIX bundle, a MISP event or a CSV table."></textarea>
+            </label>
+            <button class="btn btn-small" id="btn-paste">Add to incident</button>
+          </section>
+
+          <section class="panel-section">
+            <h3 class="section-title">Samples</h3>
+            <div id="sample-list" class="sample-list"></div>
+          </section>
+
+          <section class="panel-section">
+            <h3 class="section-title">Sources</h3>
+            <div id="source-list"></div>
+          </section>
+
+          <section class="panel-section" id="warnings-section" hidden>
+            <h3 class="section-title">Parser notes</h3>
+            <ul id="warning-list" class="warning-list"></ul>
+          </section>
+
+          <section class="panel-section">
+            <button class="btn btn-small btn-danger" id="btn-reset">Start a new incident</button>
+          </section>
+        </aside>
+
+        <section class="canvas" id="canvas">
+          <div class="stage" id="stage"></div>
+          <div class="canvas-empty" id="canvas-empty">
+            <h2>No artifacts yet</h2>
+            <p>Upload or paste threat intelligence, or load one of the samples, to build a GIBSEN diagram.</p>
+          </div>
+          <div class="canvas-hud">
+            <button class="btn btn-small" id="btn-zoom-out">−</button>
+            <span id="zoom-label">100%</span>
+            <button class="btn btn-small" id="btn-zoom-in">+</button>
+          </div>
+          <div class="link-banner" id="link-banner" hidden>
+            <span id="link-banner-text">Select the artifact to link to</span>
+            <button class="btn btn-small" id="btn-cancel-link">Cancel</button>
+          </div>
+        </section>
+
+        <aside class="inspector" id="inspector"></aside>
+      </main>
+
+      <footer class="statusbar">
+        <span id="status-text">Ready</span>
+        <span class="attribution">
+          GIBSEN — Graphical Information Base for Security Event Notation — is a visual language devised by
+          Pete Hay of Arbitr Security. This is an independent implementation.
+        </span>
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
