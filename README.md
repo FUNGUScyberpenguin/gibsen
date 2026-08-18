@@ -329,9 +329,14 @@ from a plain `file://` open.
 `.github/workflows/pages.yml` builds and deploys on every push to the
 repository's **default branch**. It gates on the default branch by name at run
 time rather than hardcoding `main`, so renaming the branch does not silently
-stop the deployments. It also passes `enablement: true` to
-`actions/configure-pages`, which provisions Pages on the first run instead of
-failing until somebody turns it on in Settings.
+stop the deployments.
+
+**One manual step, once.** Pages has to be switched on at *Settings → Pages →
+Source: **GitHub Actions***. The workflow cannot do this for you: its
+`GITHUB_TOKEN` is allowed to deploy to an existing Pages site but not to create
+one, so `actions/configure-pages` fails with *"Resource not accessible by
+integration"* until a human flips the switch. Every push after that deploys on
+its own.
 
 To deploy somewhere else, `dist/` is the whole thing — copy it anywhere that
 serves files.
