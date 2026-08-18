@@ -1,20 +1,35 @@
-/** Browser download helpers for the four export formats. */
+/** Browser download helpers for the export formats. */
 
 import type { Incident } from '../model/types';
+import type { ChokePoint } from '../analysis/congruence';
+import type { Theme } from '../render/theme';
 import { toMarkdownReport } from './report';
+import { buildInteractiveHtml } from './interactive';
+
+/**
+ * Serialise a rendered diagram.
+ *
+ * `keepHooks` decides whether the `data-node-id` attributes survive. A flat SVG
+ * has no use for them and they are app state, not diagram content — but the
+ * interactive export is built entirely on them.
+ */
+export function serialiseSvg(svg: SVGSVGElement, keepHooks = false): string {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  if (!keepHooks) {
+    clone.querySelectorAll('[data-node-id], [data-edge-id]').forEach((node) => {
+      node.removeAttribute('data-node-id');
+      node.removeAttribute('data-edge-id');
+      node.removeAttribute('cursor');
+    });
+  }
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  return new XMLSerializer().serializeToString(clone);
+}
 
 /** Serialise a rendered diagram to a standalone SVG document. */
 export function toSvgString(svg: SVGSVGElement): string {
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  // Selection rings and hit-testing hooks are app state, not diagram content.
-  clone.querySelectorAll('[data-node-id], [data-edge-id]').forEach((node) => {
-    node.removeAttribute('data-node-id');
-    node.removeAttribute('data-edge-id');
-    node.removeAttribute('cursor');
-  });
-  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n${serialiseSvg(svg, false)}`;
 }
 
 export function downloadBlob(filename: string, blob: Blob): void {
@@ -48,6 +63,26 @@ export function exportJson(incident: Incident): void {
     `${slugify(incident.name)}.gibsen.json`,
     new Blob([JSON.stringify(incident, null, 2)], { type: 'application/json' }),
   );
+}
+
+/**
+ * A single self-contained page: the diagram, the whole record and the script to
+ * explore it. Deliberately one file, so it can be attached to a ticket or an
+ * email and still work with no network at all.
+ */
+export function exportInteractive(
+  svg: SVGSVGElement,
+  incident: Incident,
+  theme: Theme,
+  chokePoints: ChokePoint[],
+): void {
+  const html = buildInteractiveHtml({
+    incident,
+    svgMarkup: serialiseSvg(svg, true),
+    theme,
+    chokePoints,
+  });
+  downloadBlob(`${slugify(incident.name)}.gibsen.html`, new Blob([html], { type: 'text/html;charset=utf-8' }));
 }
 
 export function exportMarkdown(incident: Incident): void {

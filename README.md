@@ -247,6 +247,7 @@ artifact is dropped.
 
 | Format | Notes |
 | --- | --- |
+| **Interactive page** | One self-contained `.html` — pan, zoom, hover, click through the whole record. Details below |
 | **SVG** | Self-contained — no external fonts, CSS or images. Opens anywhere |
 | **PNG** | 2× raster of the same SVG |
 | **JSON** | The full incident, re-openable |
@@ -254,6 +255,30 @@ artifact is dropped.
 
 The on-screen diagram and the exported file are produced by the same renderer,
 so they cannot drift apart.
+
+### The interactive page
+
+The format to hand to somebody else. A single `.html` file carrying the diagram,
+the entire incident record and the script to explore it — **no server, no build
+step, no network requests at all**. Attach it to a ticket, put it on a share, or
+open it from `file://` on a machine with no internet.
+
+- **Hover** an artifact for a summary: category, plane, when, confidence, tactic,
+  and the first line of the analyst's commentary
+- **Click** for the whole record — technical fields, ATT&CK, log excerpts,
+  commentary, and every behaviour touching it
+- **Follow a connection** to walk the chain artifact by artifact
+- **Search** dims everything that does not match; quick filters narrow to
+  attacker-controlled artifacts, points of congruence, or the unsequenced ones
+- **Deep links** — selecting an artifact puts it in the address bar, so you can
+  send someone a link to the exact node you want them to look at
+- Drag to pan, ctrl/⌘+scroll to zoom, `/` to search, `f` to fit, `Esc` to close
+
+This is the zoom-out-for-the-summary, zoom-in-for-the-detail property the method
+depends on: an executive reads the shape, an analyst opens the node.
+
+Artifact text is escaped on the way in, so a hostile label or a log excerpt
+containing `</script>` cannot break out of the page it is embedded in.
 
 ---
 
@@ -280,7 +305,7 @@ src/
   layout/      time bucketing, plane bands, interval packing, edge routing
   analysis/    points of congruence
   render/      SVG renderer and palettes
-  export/      SVG/PNG/JSON download, Markdown report
+  export/      SVG/PNG/JSON download, Markdown report, interactive page
   ui/          DOM helpers, inspector panel
   main.ts      app shell: state, uploads, zoom/pan, selection
 samples/       the sample documents (also used by the tests)

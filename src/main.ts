@@ -15,9 +15,9 @@ import { ingest } from './ingest';
 import type { Granularity } from './layout/layout';
 import { layout } from './layout/layout';
 import { renderDiagram } from './render/diagram';
-import { findChokePoints } from './analysis/congruence';
+import { findChokePoints, type ChokePoint } from './analysis/congruence';
 import { themeByName } from './render/theme';
-import { exportJson, exportMarkdown, exportPng, exportSvg } from './export/download';
+import { exportInteractive, exportJson, exportMarkdown, exportPng, exportSvg } from './export/download';
 import { renderInspector, type Selection } from './ui/inspector';
 import { h } from './ui/dom';
 import { SAMPLES } from './samples';
@@ -104,11 +104,15 @@ function setStatus(message: string): void {
  * Artifact id -> how many others depend on it. Empty when the overlay is off,
  * which is also what the renderer wants in order to skip the marking entirely.
  */
-function chokePointMap(): Map<string, number> {
-  if (!state.view.showCongruence) return new Map();
+function topChokePoints(): ChokePoint[] {
   // Beyond a handful the ring stops meaning anything, so keep it to the ones
   // that actually hold the chain up.
-  return new Map(findChokePoints(state.incident).slice(0, 6).map((c) => [c.nodeId, c.severed]));
+  return findChokePoints(state.incident).slice(0, 6);
+}
+
+function chokePointMap(): Map<string, number> {
+  if (!state.view.showCongruence) return new Map();
+  return new Map(topChokePoints().map((c) => [c.nodeId, c.severed]));
 }
 
 function drawDiagram(): void {
@@ -543,11 +547,17 @@ async function runExport(kind: string): Promise<void> {
     showLegend: state.view.showLegend,
     showEdgeLabels: state.view.showEdgeLabels,
     chokePoints: chokePointMap(),
-    interactive: false,
+    // Hooks are kept so the interactive export can wire itself up; the flat
+    // SVG and PNG exporters strip them on the way out.
+    interactive: true,
   });
 
   try {
     switch (kind) {
+      case 'html':
+        exportInteractive(clean, state.incident, themeByName(state.view.theme), topChokePoints());
+        setStatus('Interactive page exported — one file, opens anywhere.');
+        break;
       case 'svg':
         exportSvg(clean, state.incident);
         setStatus('SVG exported.');
