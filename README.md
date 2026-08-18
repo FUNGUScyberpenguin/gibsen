@@ -318,10 +318,28 @@ layout, the renderer and the inspector pick both up without further changes.
 
 ## Deploying
 
-`npm run build` emits a static site to `dist/` with relative asset paths, so it
-works from a subdirectory, a project-scoped GitHub Pages URL, or a plain `file://`
-open. `.github/workflows/pages.yml` deploys it on every push to the default
-branch once Pages is enabled (Settings → Pages → Source: GitHub Actions).
+The tool is a static site — there is no server side to it — so GitHub Pages is
+a complete deployment, not a demo of one.
+
+`npm run build` emits `dist/` with **relative** asset paths, which is what lets
+it work unchanged from a project-pages URL like
+`https://<user>.github.io/gibsen/`, from a subdirectory on any web server, or
+from a plain `file://` open.
+
+`.github/workflows/pages.yml` builds and deploys on every push to the
+repository's **default branch**. It gates on the default branch by name at run
+time rather than hardcoding `main`, so renaming the branch does not silently
+stop the deployments. It also passes `enablement: true` to
+`actions/configure-pages`, which provisions Pages on the first run instead of
+failing until somebody turns it on in Settings.
+
+To deploy somewhere else, `dist/` is the whole thing — copy it anywhere that
+serves files.
+
+**A note on hosting it publicly.** The tool keeps incident data in the browser
+and uploads nothing, so a public instance is not a data-handling risk to its
+users. The consideration is the other one in the attribution section above:
+GIBSEN™ is Arbitr's mark, and a public instance is worth a word with Pete first.
 
 ## Not built yet
 
