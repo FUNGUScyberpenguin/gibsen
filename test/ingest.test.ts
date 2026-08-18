@@ -441,6 +441,29 @@ describe('parseCsv', () => {
     expect(result.edges[0].relation).toBe('resolves-to');
   });
 
+  it('reads an end column into a span', () => {
+    const lure = result().nodes.find((n) => n.label === 'Invoice_Q1_2024.xlsm');
+    expect(lure?.t).toBe('2024-03-12T07:41:00.000Z');
+    expect(lure?.tEnd).toBe('2024-03-12T07:58:00.000Z');
+  });
+
+  it('reads the aggregate and count columns into a triangle', () => {
+    const sweep = result().nodes.find((n) => n.label === 'internal SMB sweep');
+    expect(sweep?.aggregate).toEqual({ kind: 'fan-out', count: 412 });
+
+    const beacons = result().nodes.find((n) => n.label === 'beacon sessions');
+    expect(beacons?.aggregate).toEqual({ kind: 'converge', count: 1184 });
+  });
+
+  it('treats a bare count as many, fanning out by default', () => {
+    const nodes = parseCsv('artifact,count\nsubnet sweep,254').nodes;
+    expect(nodes[0].aggregate).toEqual({ kind: 'fan-out', count: 254 });
+  });
+
+  it('leaves a single artifact alone', () => {
+    expect(parseCsv('artifact,aggregate\na.example.com,no').nodes[0].aggregate).toBeNull();
+  });
+
   it('rejects a sheet with no usable column', () => {
     expect(() => parseCsv('alpha,beta\n1,2')).toThrow(/usable column/);
   });

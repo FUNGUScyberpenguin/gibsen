@@ -1,21 +1,24 @@
 /**
- * Time-driven plane layout.
+ * Time-driven artifact-plane layout.
  *
- * Columns are ordered time buckets, rows are the technical planes. Columns are
- * equal width rather than proportional to elapsed time on purpose: an incident
- * that jumps from a 90-second exploit chain to a dwell of three weeks would be
- * unreadable to scale, and the narrative sequence is what a GIBSEN diagram is
- * for. The real interval is always printed on the axis, so nothing is hidden.
+ * The X axis is time and the Y axis clusters artifacts by where you go looking
+ * for them. Columns are equal width rather than proportional to elapsed time on
+ * purpose: an incident that jumps from a 90-second exploit chain to a dwell of
+ * three weeks would be unreadable to scale, and the sequence is what the
+ * diagram is for. The real interval is always printed on the axis, so nothing
+ * is hidden.
  */
 
-import type { GibsenEdge, GibsenNode, Incident, PlaneId } from '../model/types';
-import { PLANES } from '../model/taxonomy';
+import type { GibsenEdge, GibsenNode, Incident, PlaneId, PlaneSetId } from '../model/types';
+import { planesFor, resolvePlane } from '../model/taxonomy';
 
 export const NODE_W = 176;
 export const NODE_H = 60;
 const COL_GAP = 34;
 const ROW_GAP = 16;
 const BAND_PAD = 20;
+/** Boundary seams get less breathing room — they are a line, not a region. */
+const SEAM_PAD = 8;
 /** Wide enough to print "Operational Technology" in full at 13px. */
 export const GUTTER_W = 212;
 export const HEADER_H = 72;
@@ -110,12 +113,16 @@ export interface PlaneBand {
   blurb: string;
   accent: string;
   extension: boolean;
+  /** Drawn as a seam between neighbouring bands rather than as a band. */
+  boundary: boolean;
   y: number;
   height: number;
 }
 
 export interface PositionedNode {
   node: GibsenNode;
+  /** The plane it was drawn in, already resolved against the active set. */
+  plane: PlaneId;
   x: number;
   y: number;
   w: number;
@@ -123,6 +130,8 @@ export interface PositionedNode {
   /** Centre point, cached for edge routing. */
   cx: number;
   cy: number;
+  /** True when the node was widened to cover a period rather than an instant. */
+  spanning: boolean;
 }
 
 export interface RoutedEdge {
@@ -148,12 +157,15 @@ export interface LayoutResult {
   nodes: PositionedNode[];
   edges: RoutedEdge[];
   granularity: Granularity;
+  planeSet: PlaneSetId;
   /** Nodes hidden because their plane band was collapsed away. */
   unplaced: GibsenNode[];
 }
 
 export interface LayoutOptions {
   granularity?: Granularity | 'auto';
+  /** Which family of artifact planes to draw against. */
+  planeSet?: PlaneSetId;
   /** Draw planes that contain no artifacts. Off by default to save height. */
   showEmptyPlanes?: boolean;
   maxColumns?: number;
@@ -210,8 +222,25 @@ export function formatDelta(fromIso: string, toIso: string): string | null {
   return parts.length ? `+ ${parts.join(' ')}` : null;
 }
 
+/** One artifact's plane and the columns it occupies. */
+interface Placement {
+  node: GibsenNode;
+  plane: PlaneId;
+  startCol: number;
+  endCol: number;
+}
+
 export function layout(incident: Incident, options: LayoutOptions = {}): LayoutResult {
-  const stamps = incident.nodes.map((n) => n.t).filter((t): t is string => Boolean(t));
+  const planeSet = options.planeSet ?? incident.planeSet ?? 'talk';
+
+  // An artifact that spans time puts a stamp at each end, and both deserve a
+  // column — the delete at the far end is as much an event as the write.
+  const stamps: string[] = [];
+  for (const n of incident.nodes) {
+    if (n.t) stamps.push(n.t);
+    if (n.t && n.tEnd) stamps.push(n.tEnd);
+  }
+
   const granularity =
     !options.granularity || options.granularity === 'auto'
       ? chooseGranularity(stamps, options.maxColumns ?? 16)
@@ -235,11 +264,11 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   }
 
   let previousDay = '';
-  for (const key of bucketKeys) {
+  bucketKeys.forEach((key, position) => {
     const { label, sublabel } = formatColumnLabel(key, granularity);
     const showSub = sublabel && sublabel !== previousDay;
     if (sublabel) previousDay = sublabel;
-    const prevKey = bucketKeys[bucketKeys.indexOf(key) - 1];
+    const prevKey = bucketKeys[position - 1];
     columns.push({
       key,
       index,
@@ -249,7 +278,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
       delta: prevKey ? formatDelta(prevKey, key) : null,
     });
     index += 1;
-  }
+  });
 
   if (columns.length === 0) {
     // Nothing to draw, but keep one column so the axis still renders.
@@ -258,46 +287,80 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
 
   const columnIndexByKey = new Map<string | null, number>(columns.map((c) => [c.key, c.index]));
 
-  // --- assign nodes to cells -------------------------------------------
-  /** `${plane}|${columnIndex}` -> nodes stacked in that cell. */
-  const cells = new Map<string, GibsenNode[]>();
-  const occupiedPlanes = new Set<PlaneId>();
+  /** Column holding this instant, falling back to the nearest earlier one. */
+  const columnForTime = (iso: string): number => {
+    const key = bucketStart(iso, granularity);
+    const exact = columnIndexByKey.get(key);
+    if (exact !== undefined) return exact;
+    let best = 0;
+    for (const column of columns) {
+      if (column.key && column.key <= key) best = column.index;
+    }
+    return best;
+  };
 
-  // Stable ordering inside a cell: pivot first, then by time, then by label.
+  // --- assign each artifact a plane and a column interval ---------------
+  // Stable ordering: pivot first, then by time, then by label.
   const ordered = [...incident.nodes].sort((a, b) => {
     if (a.pivot !== b.pivot) return a.pivot ? -1 : 1;
     if (a.t && b.t && a.t !== b.t) return a.t < b.t ? -1 : 1;
+    if (a.t && !b.t) return -1;
+    if (!a.t && b.t) return 1;
     return a.label.localeCompare(b.label);
   });
 
-  for (const node of ordered) {
-    const key = node.t ? bucketStart(node.t, granularity) : null;
-    const col = columnIndexByKey.get(key) ?? 0;
-    const cellKey = `${node.plane}|${col}`;
-    const bucket = cells.get(cellKey);
-    if (bucket) bucket.push(node);
-    else cells.set(cellKey, [node]);
-    occupiedPlanes.add(node.plane);
-  }
+  const placements: Placement[] = ordered.map((node) => {
+    const startCol = node.t ? columnForTime(node.t) : (columnIndexByKey.get(null) ?? 0);
+    const endCol = node.t && node.tEnd ? Math.max(startCol, columnForTime(node.tEnd)) : startCol;
+    return { node, plane: resolvePlane(node, planeSet), startCol, endCol };
+  });
 
   // --- plane bands ------------------------------------------------------
-  const visiblePlanes = PLANES.filter((p) => options.showEmptyPlanes || occupiedPlanes.has(p.id));
+  const occupied = new Set(placements.map((p) => p.plane));
+  const visiblePlanes = planesFor(planeSet).filter((p) => options.showEmptyPlanes || occupied.has(p.id));
+
+  /**
+   * Greedy interval partitioning per plane: walk the artifacts left to right
+   * and drop each into the first lane whose previous occupant has finished.
+   * For point-in-time artifacts this degenerates to the obvious stacking.
+   */
+  const laneOf = new Map<GibsenNode, number>();
+  const laneCount = new Map<PlaneId, number>();
+
+  for (const plane of visiblePlanes) {
+    const members = placements
+      .filter((p) => p.plane === plane.id)
+      .sort((a, b) => a.startCol - b.startCol || ordered.indexOf(a.node) - ordered.indexOf(b.node));
+
+    /** Last column occupied in each lane. */
+    const laneEnds: number[] = [];
+    for (const p of members) {
+      let lane = laneEnds.findIndex((end) => end < p.startCol);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(p.endCol);
+      } else {
+        laneEnds[lane] = p.endCol;
+      }
+      laneOf.set(p.node, lane);
+    }
+    laneCount.set(plane.id, Math.max(1, laneEnds.length));
+  }
+
   const bands: PlaneBand[] = [];
   let y = HEADER_H + CANVAS_PAD;
 
   for (const plane of visiblePlanes) {
-    let maxStack = 1;
-    for (const col of columns) {
-      const count = cells.get(`${plane.id}|${col.index}`)?.length ?? 0;
-      if (count > maxStack) maxStack = count;
-    }
-    const height = BAND_PAD * 2 + maxStack * NODE_H + (maxStack - 1) * ROW_GAP;
+    const lanes = laneCount.get(plane.id) ?? 1;
+    const pad = plane.boundary ? SEAM_PAD : BAND_PAD;
+    const height = pad * 2 + lanes * NODE_H + (lanes - 1) * ROW_GAP;
     bands.push({
       plane: plane.id,
       label: plane.label,
       blurb: plane.blurb,
       accent: plane.accent,
       extension: Boolean(plane.extension),
+      boundary: Boolean(plane.boundary),
       y,
       height,
     });
@@ -310,26 +373,28 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   const positioned: PositionedNode[] = [];
   const unplaced: GibsenNode[] = [];
 
-  for (const [cellKey, members] of cells) {
-    const [planeId, colStr] = cellKey.split('|');
-    const band = bandByPlane.get(planeId as PlaneId);
+  for (const p of placements) {
+    const band = bandByPlane.get(p.plane);
     if (!band) {
-      unplaced.push(...members);
+      unplaced.push(p.node);
       continue;
     }
-    const column = columns[Number(colStr)];
-    members.forEach((node, row) => {
-      const x = column.x;
-      const nodeY = band.y + BAND_PAD + row * (NODE_H + ROW_GAP);
-      positioned.push({
-        node,
-        x,
-        y: nodeY,
-        w: NODE_W,
-        h: NODE_H,
-        cx: x + NODE_W / 2,
-        cy: nodeY + NODE_H / 2,
-      });
+    const lane = laneOf.get(p.node) ?? 0;
+    const pad = band.boundary ? SEAM_PAD : BAND_PAD;
+    const x = columns[p.startCol].x;
+    const nodeY = band.y + pad + lane * (NODE_H + ROW_GAP);
+    const w = NODE_W + (p.endCol - p.startCol) * COL_W;
+
+    positioned.push({
+      node: p.node,
+      plane: p.plane,
+      x,
+      y: nodeY,
+      w,
+      h: NODE_H,
+      cx: x + w / 2,
+      cy: nodeY + NODE_H / 2,
+      spanning: p.endCol > p.startCol,
     });
   }
 
@@ -347,7 +412,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   const width = GUTTER_W + CANVAS_PAD * 2 + columns.length * COL_W;
   const height = y + CANVAS_PAD;
 
-  return { width, height, columns, bands, nodes: positioned, edges: routed, granularity, unplaced };
+  return { width, height, columns, bands, nodes: positioned, edges: routed, granularity, planeSet, unplaced };
 }
 
 /**

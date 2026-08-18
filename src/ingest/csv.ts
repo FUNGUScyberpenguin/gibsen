@@ -18,7 +18,7 @@ import type {
   Tactic,
 } from '../model/types';
 import { makeEdge, makeNode, nextId } from '../model/incident';
-import { CATEGORIES, PLANES, RELATIONS, TACTICS, matchCategory } from '../model/taxonomy';
+import { ALL_PLANES, CATEGORIES, RELATIONS, TACTICS, matchCategory } from '../model/taxonomy';
 import { parseTimestamp, refineFileCategory, truncateLabel } from './common';
 
 /** RFC 4180 style splitter that tolerates quoted delimiters and newlines. */
@@ -93,6 +93,9 @@ const HEADER_ALIASES: Record<string, string[]> = {
   category: ['category', 'type', 'artifact_type', 'ioc_type', 'kind'],
   plane: ['plane', 'layer', 'tier'],
   time: ['time', 'timestamp', 'datetime', 'date', 'first_seen', 'when', 'occurred', 'event_time'],
+  end: ['end', 'until', 'last_seen', 'end_time', 'through', 'ended'],
+  aggregate: ['aggregate', 'many', 'stands_for', 'fan'],
+  count: ['count', 'quantity', 'how_many'],
   confidence: ['confidence', 'certainty'],
   tactic: ['tactic', 'phase', 'stage', 'kill_chain', 'killchain', 'attack_tactic'],
   techniques: ['technique', 'techniques', 'attack', 'mitre', 'attck', 'technique_id'],
@@ -171,13 +174,24 @@ function coerceTactic(value: string): Tactic | null {
 function coercePlane(value: string): PlaneId | null {
   const v = value.trim().toLowerCase();
   if (!v) return null;
-  const direct = PLANES.find((p) => p.id === v || p.label.toLowerCase() === v);
+  const direct = ALL_PLANES.find((p) => p.id === v || p.label.toLowerCase() === v);
   if (direct) return direct.id;
   if (v.startsWith('host') || v.startsWith('endpoint')) return 'host';
   if (v.startsWith('net')) return 'network';
   if (v.startsWith('cloud')) return 'cloud';
   if (v === 'ot' || v.startsWith('ics') || v.startsWith('scada') || v.startsWith('oper')) return 'ot';
   if (v.startsWith('adv') || v.startsWith('actor')) return 'adversary';
+  return null;
+}
+
+/** Read a "stands for many" column into a triangle direction. */
+function coerceAggregate(value: string): 'fan-out' | 'converge' | null {
+  const v = value.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (!v || v === 'no' || v === 'false' || v === '0' || v === 'none') return null;
+  if (/^(fan-?out|one-to-many|1-to-many|scan|sweep|enumerat\w*|out)$/.test(v)) return 'fan-out';
+  if (/^(converge|many-to-one|many-to-1|sessions?|beacons?|in)$/.test(v)) return 'converge';
+  // A bare truthy value means many, and fanning out is the common case.
+  if (/^(yes|true|1|many)$/.test(v)) return 'fan-out';
   return null;
 }
 
@@ -280,13 +294,19 @@ export function parseCsv(text: string, options: { name?: string } = {}): IngestR
     }
 
     const t = parseTimestamp(cellFor(row, 'time'));
+    const tEnd = parseTimestamp(cellFor(row, 'end'));
     const techniquesRaw = cellFor(row, 'techniques');
+
+    const aggregateKind = coerceAggregate(cellFor(row, 'aggregate'));
+    const countRaw = cellFor(row, 'count');
+    const count = countRaw && Number.isFinite(Number(countRaw)) ? Number(countRaw) : null;
 
     const node = makeNode({
       label: truncateLabel(label),
       category,
       plane: coercePlane(cellFor(row, 'plane')) ?? undefined,
       t,
+      tEnd,
       timeBasis: t ? 'observed' : 'unknown',
       confidence: coerceConfidence(cellFor(row, 'confidence')) ?? 'probable',
       tactic: coerceTactic(cellFor(row, 'tactic')),
@@ -294,6 +314,8 @@ export function parseCsv(text: string, options: { name?: string } = {}): IngestR
       details,
       commentary: cellFor(row, 'commentary'),
       compromised: coerceBoolean(cellFor(row, 'compromised')),
+      // A count on its own is enough to mean "many" — the direction defaults.
+      aggregate: aggregateKind || count ? { kind: aggregateKind ?? 'fan-out', count } : null,
       sources: [sourceId],
     });
 

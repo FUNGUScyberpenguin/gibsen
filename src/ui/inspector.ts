@@ -8,7 +8,7 @@
  */
 
 import type { Confidence, GibsenEdge, GibsenNode, Incident, PlaneId, TimeBasis } from '../model/types';
-import { CATEGORIES, PLANES, RELATIONS, TACTICS, categoriesByPlane } from '../model/taxonomy';
+import { ALL_PLANES, CATEGORIES, RELATIONS, TACTICS, categoriesByPlane, planesFor, resolvePlane } from '../model/taxonomy';
 import { iconFor } from '../model/icons';
 import { parseTimestamp } from '../ingest/common';
 import { clear, field, h, select } from './dom';
@@ -63,10 +63,12 @@ export function renderInspector(
 // ---------------------------------------------------------------------------
 
 function incidentPanel(incident: Incident, handlers: InspectorHandlers): HTMLElement {
-  const planeCounts = PLANES.map((p) => ({
-    plane: p,
-    count: incident.nodes.filter((n) => n.plane === p.id).length,
-  })).filter((entry) => entry.count > 0);
+  // Count against the planes as drawn, not as stored — a node keeps a coarse
+  // plane on disk and is resolved into the active set for display.
+  const set = incident.planeSet ?? 'talk';
+  const planeCounts = planesFor(set)
+    .map((p) => ({ plane: p, count: incident.nodes.filter((n) => resolvePlane(n, set) === p.id).length }))
+    .filter((entry) => entry.count > 0);
 
   const unsequenced = incident.nodes.filter((n) => !n.t).length;
 
@@ -168,6 +170,38 @@ function nodePanel(node: GibsenNode, incident: Incident, handlers: InspectorHand
     },
   });
 
+  const endHint = h('span', {
+    class: 'field-hint',
+    text: node.tEnd ? `Drawn through to ${node.tEnd}` : 'Set this to draw the artifact as a span.',
+  });
+  const endInput = h('input', {
+    type: 'text',
+    value: node.tEnd ?? '',
+    placeholder: 'Optional',
+    on: {
+      change: (e) => {
+        const raw = (e.target as HTMLInputElement).value.trim();
+        if (!raw) {
+          patch({ tEnd: null });
+          endHint.textContent = 'Set this to draw the artifact as a span.';
+          return;
+        }
+        const iso = parseTimestamp(raw);
+        if (!iso) {
+          endHint.textContent = 'Not a date this tool recognises — try an ISO 8601 value.';
+          return;
+        }
+        if (node.t && iso <= node.t) {
+          endHint.textContent = 'An end before the start is a data error; left unset.';
+          patch({ tEnd: null });
+          return;
+        }
+        patch({ tEnd: iso });
+        endHint.textContent = `Drawn through to ${iso}`;
+      },
+    },
+  });
+
   const connections = incident.edges.filter((e) => e.from === node.id || e.to === node.id);
 
   return h(
@@ -210,14 +244,19 @@ function nodePanel(node: GibsenNode, incident: Incident, handlers: InspectorHand
       field(
         'Plane',
         select(
-          PLANES.map((p) => ({ value: p.id, label: p.label })),
+          ALL_PLANES.map((p) => ({ value: p.id, label: p.label })),
           node.plane,
           (value) => patch({ plane: value as PlaneId }),
         ),
       ),
     ),
 
-    h('div', { class: 'field-row' }, h('div', { class: 'field' }, h('span', { class: 'field-label', text: 'Time (UTC)' }), timeInput, timeHint)),
+    h(
+      'div',
+      { class: 'field-row' },
+      h('div', { class: 'field' }, h('span', { class: 'field-label', text: 'Time (UTC)' }), timeInput, timeHint),
+      h('div', { class: 'field' }, h('span', { class: 'field-label', text: 'Until (UTC)' }), endInput, endHint),
+    ),
 
     h(
       'div',
@@ -267,6 +306,51 @@ function nodePanel(node: GibsenNode, incident: Incident, handlers: InspectorHand
       { class: 'checkbox-row' },
       checkbox('Attacker-controlled', node.compromised, (v) => patch({ compromised: v })),
       checkbox('Investigation pivot', node.pivot, (v) => patch({ pivot: v })),
+    ),
+
+    h(
+      'div',
+      { class: 'field-row' },
+      field(
+        'Stands for many',
+        select(
+          [
+            { value: '', label: 'No — a single artifact' },
+            { value: 'fan-out', label: 'One reaching many' },
+            { value: 'converge', label: 'Many reaching one' },
+          ],
+          node.aggregate?.kind ?? '',
+          (value) =>
+            patch({
+              aggregate: value
+                ? { kind: value as 'fan-out' | 'converge', count: node.aggregate?.count ?? null, of: node.aggregate?.of }
+                : null,
+            }),
+        ),
+        'Drawn as a triangle instead of a box.',
+      ),
+      field(
+        'How many, of what',
+        h('input', {
+          type: 'text',
+          value: [node.aggregate?.count ?? '', node.aggregate?.of ?? ''].filter(Boolean).join(' '),
+          placeholder: '412 internal hosts',
+          on: {
+            change: (e) => {
+              if (!node.aggregate) return;
+              const raw = (e.target as HTMLInputElement).value.trim();
+              const match = raw.match(/^(\d+)\s*(.*)$/);
+              patch({
+                aggregate: {
+                  kind: node.aggregate.kind,
+                  count: match ? Number(match[1]) : null,
+                  of: (match ? match[2] : raw).trim() || undefined,
+                },
+              });
+            },
+          },
+        }),
+      ),
     ),
 
     field(

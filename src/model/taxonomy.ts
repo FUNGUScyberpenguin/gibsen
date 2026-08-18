@@ -1,5 +1,5 @@
 /**
- * The GIBSEN vocabulary: planes, artifact categories, relations and tactics.
+ * The vocabulary: artifact planes, categories, relations and tactics.
  *
  * This file is the single place to correct or extend the visual language.
  * Adding a category here makes it available to every parser, the layout, the
@@ -7,7 +7,7 @@
  * `icons.ts` if the new category wants its own glyph.
  */
 
-import type { CategoryId, PlaneId, RelationId, Tactic } from './types';
+import type { CategoryId, PlaneId, PlaneSetId, RelationId, Tactic } from './types';
 
 export interface PlaneDef {
   id: PlaneId;
@@ -16,31 +16,94 @@ export interface PlaneDef {
   blurb: string;
   accent: string;
   /**
-   * True for planes outside Pete Hay's original four. The adversary rail is an
-   * addition of this tool, drawn muted and dashed so it reads as annotation
-   * rather than as a fifth technical plane.
+   * True for planes that are this tool's addition rather than the methodology's.
+   * The adversary rail is drawn muted and dashed so it reads as annotation
+   * rather than as a peer of the artifact planes.
    */
   extension?: boolean;
+  /**
+   * Drawn as a divider between its neighbours rather than as a band of its own.
+   * The registry sits on the line between memory and disk because it is
+   * genuinely sometimes one and sometimes the other.
+   */
+  boundary?: boolean;
 }
 
-/** Ordered top to bottom, the way a diagram is drawn. */
-export const PLANES: PlaneDef[] = [
-  {
-    id: 'adversary',
-    label: 'Adversary',
-    blurb: 'Actors, tooling, weaknesses',
-    accent: '#a78bfa',
-    extension: true,
-  },
+const PLANE_DEFS: PlaneDef[] = [
+  { id: 'adversary', label: 'Adversary', blurb: 'Actors, tooling, weaknesses', accent: '#a78bfa', extension: true },
   { id: 'cloud', label: 'Cloud', blurb: 'Tenants, identity and SaaS', accent: '#38bdf8' },
   { id: 'network', label: 'Network', blurb: 'Transit, perimeter and C2', accent: '#2dd4bf' },
   { id: 'host', label: 'Hosts', blurb: 'Endpoints, processes, accounts', accent: '#fbbf24' },
   { id: 'ot', label: 'Operational Technology', blurb: 'Control systems and safety', accent: '#fb7185' },
+  { id: 'external-network', label: 'External network', blurb: 'Domains, addresses, mail, C2', accent: '#2dd4bf' },
+  { id: 'internal-network', label: 'Internal network', blurb: 'Hosts, shares, perimeter kit', accent: '#22d3ee' },
+  { id: 'host-memory', label: 'Host memory', blurb: 'Processes, services, credentials', accent: '#fbbf24' },
+  { id: 'host-registry', label: 'Registry', blurb: 'Sometimes memory, sometimes disk', accent: '#f59e0b', boundary: true },
+  { id: 'host-filesystem', label: 'Host file system', blurb: 'Files on disk, tasks, logs', accent: '#fcd34d' },
 ];
 
 export const PLANE_BY_ID: Record<PlaneId, PlaneDef> = Object.fromEntries(
-  PLANES.map((p) => [p.id, p]),
+  PLANE_DEFS.map((p) => [p.id, p]),
 ) as Record<PlaneId, PlaneDef>;
+
+export interface PlaneSet {
+  id: PlaneSetId;
+  label: string;
+  blurb: string;
+  /** Ordered top to bottom, the way the diagram is drawn. */
+  planes: PlaneId[];
+}
+
+/**
+ * Two ways to slice the Y axis, both of them Pete Hay's.
+ *
+ * `talk` is the one taught in "The Importance of Arts and Crafts in ThreatOps":
+ * cluster artifacts by where you go looking for them, which means splitting the
+ * network into what is inside and what is outside, and splitting the host into
+ * memory and disk with the registry straddling the two.
+ *
+ * `domain` is the coarser slice the Arbitr platform later shipped, which suits
+ * intelligence that crosses cloud and OT.
+ *
+ * Neither is canon. The talk is explicit that there are no artifact plane
+ * police and that you should subdivide these to taste — adding a set here is
+ * a few lines.
+ */
+export const PLANE_SETS: PlaneSet[] = [
+  {
+    id: 'talk',
+    label: 'Artifact planes',
+    blurb: 'Where you go looking: outside, inside, memory, disk',
+    planes: [
+      'adversary',
+      'cloud',
+      'external-network',
+      'internal-network',
+      'host-memory',
+      'host-registry',
+      'host-filesystem',
+      'ot',
+    ],
+  },
+  {
+    id: 'domain',
+    label: 'Technical domains',
+    blurb: 'Cloud, network, hosts and operational technology',
+    planes: ['adversary', 'cloud', 'network', 'host', 'ot'],
+  },
+];
+
+export const PLANE_SET_BY_ID: Record<PlaneSetId, PlaneSet> = Object.fromEntries(
+  PLANE_SETS.map((s) => [s.id, s]),
+) as Record<PlaneSetId, PlaneSet>;
+
+/** The ordered plane definitions of one set. */
+export function planesFor(set: PlaneSetId): PlaneDef[] {
+  return (PLANE_SET_BY_ID[set] ?? PLANE_SET_BY_ID.talk).planes.map((id) => PLANE_BY_ID[id]);
+}
+
+/** Every plane, for controls that must accept a value from either set. */
+export const ALL_PLANES: PlaneDef[] = PLANE_DEFS;
 
 export interface CategoryDef {
   id: CategoryId;
@@ -131,7 +194,7 @@ export const CATEGORY_BY_ID: Record<CategoryId, CategoryDef> = Object.fromEntrie
 
 /** Categories grouped by their default plane, for the inspector's dropdown. */
 export function categoriesByPlane(): { plane: PlaneDef; categories: CategoryDef[] }[] {
-  return PLANES.map((plane) => ({
+  return ALL_PLANES.map((plane) => ({
     plane,
     categories: CATEGORIES.filter((c) => c.plane === plane.id),
   }));
@@ -244,7 +307,63 @@ export function matchCategory(raw: string | null | undefined): CategoryId | null
   return best?.id ?? null;
 }
 
-/** The plane an artifact belongs to unless the analyst moves it. */
+/**
+ * Where a category lands in the talk's finer-grained planes, for the cases the
+ * coarse plane cannot imply. Everything else falls through to the defaults
+ * below: network artifacts are external unless listed, host artifacts are on
+ * disk unless listed.
+ *
+ * Hosts themselves sit in the internal network rather than in a host plane —
+ * the talk lists "host, end point, file servers" among the network artifacts,
+ * and reserves the host planes for what is found *on* a box: processes, user
+ * context, registry, files.
+ */
+const TALK_PLANE: Partial<Record<CategoryId, PlaneId>> = {
+  // Network kit you own, as opposed to infrastructure out on the internet.
+  'network-share': 'internal-network',
+  router: 'internal-network',
+  firewall: 'internal-network',
+  proxy: 'internal-network',
+  vpn: 'internal-network',
+  workstation: 'internal-network',
+  server: 'internal-network',
+
+  // Live on the box.
+  process: 'host-memory',
+  service: 'host-memory',
+  driver: 'host-memory',
+  credential: 'host-memory',
+  'user-account': 'host-memory',
+  malware: 'host-memory',
+  backdoor: 'host-memory',
+
+  // Genuinely both, so it is drawn on the line between them.
+  'registry-key': 'host-registry',
+};
+
+/** The plane a category belongs to in a given set, unless the analyst moves it. */
+export function planeFor(category: CategoryId, set: PlaneSetId = 'domain'): PlaneId {
+  const base = CATEGORY_BY_ID[category]?.plane ?? 'host';
+  if (set === 'domain') return base;
+
+  const override = TALK_PLANE[category];
+  if (override) return override;
+  if (base === 'network') return 'external-network';
+  if (base === 'host') return 'host-filesystem';
+  return base;
+}
+
+/**
+ * The plane a node is drawn in. A node keeps whichever plane it was given, so
+ * an analyst's correction survives; when that plane is not part of the active
+ * set, the category decides instead.
+ */
+export function resolvePlane(node: { category: CategoryId; plane: PlaneId }, set: PlaneSetId): PlaneId {
+  const inSet = PLANE_SET_BY_ID[set]?.planes.includes(node.plane);
+  return inSet ? node.plane : planeFor(node.category, set);
+}
+
+/** The plane an artifact is stored against. Canonical, and coarse. */
 export function defaultPlaneFor(category: CategoryId): PlaneId {
   return CATEGORY_BY_ID[category]?.plane ?? 'host';
 }

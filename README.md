@@ -3,9 +3,9 @@
 Upload cyber threat intelligence, get a time-driven incident diagram.
 
 GIBSEN Studio turns the intelligence you already have — a written report, a STIX
-bundle, a MISP event, an analyst's spreadsheet — into a **GIBSEN diagram**: a
-map of the artifacts, processes and behaviours of one incident, laid out across
-technical planes and driven by time.
+bundle, a MISP event, an analyst's spreadsheet — into a **threat matrix**: a map
+of the artifacts, processes and behaviours of one incident, with **time along
+the X axis** and **artifact planes down the Y**.
 
 Everything runs in the browser. Nothing is uploaded anywhere, which matters when
 the input is a live incident.
@@ -13,7 +13,7 @@ the input is a live incident.
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # 143 unit tests
+npm test         # unit tests
 npm run build    # static site in dist/
 ```
 
@@ -21,79 +21,137 @@ npm run build    # static site in dist/
 
 ## Attribution, and what this is
 
-**GIBSEN** — *Graphical Information Base for Security Event Notation* — is a
-visual language devised by **Pete Hay** of **Arbitr Security**, who ships it as
-part of a commercial platform. The name nods to William Gibson's *Pattern
-Recognition*.
+The method is **Pete Hay's**, from his talk **"The Importance of Arts and Crafts
+in ThreatOps"** at the **DEF CON 31 Packet Hacking Village** (2023), where he was
+principal security strategist at SimSpace and founder of The Cyber Report. He
+calls the construction a **threat matrix** and the Y axis **artifact planes**.
 
-This repository is an **independent, open implementation** of the ideas, not
-Arbitr's product and not affiliated with it. It was reconstructed from public
-descriptions of the methodology rather than from the source, so:
+**GIBSEN** — *Graphical Information Base for Security Event Notation* — is the
+name the same idea carries at **Arbitr Security**, where Pete is now CEO, as
+part of a commercial platform. The talk itself never uses the name.
 
-- The **icon set here is our own**. Arbitr's iconology is theirs; every glyph in
-  `src/model/icons.ts` was drawn for this project and is trivially replaceable.
-- The **four planes and the time-driven layout** follow the methodology as
-  publicly described. Anything finer-grained is our interpretation.
-- If you plan to publish diagrams from this tool, or to host it publicly, **talk
-  to Pete first.** GIBSEN™ is his mark, and a conversation costs nothing next to
-  a trademark dispute. He may also simply tell you which parts we got wrong,
-  which would improve the tool.
+This repository is an **independent, open implementation**, not Arbitr's product
+and not affiliated with it. Specifically:
 
-Corrections to the vocabulary belong in `src/model/taxonomy.ts` and
-`src/model/icons.ts` — those two files are deliberately the only places the
-visual language is defined.
+- The **icon set here is our own**. Every glyph in `src/model/icons.ts` was drawn
+  for this project.
+- The **structure** — time on X, artifact planes on Y, triangles for many-at-once,
+  long nodes for duration, the registry on the seam between memory and disk —
+  follows the talk.
+- Anything finer-grained is our interpretation, and the two plane sets below are
+  our reading of two vintages of the same idea.
+
+**Pete does not claim this as a standard, and neither do we.** He raises XKCD 927
+in the talk himself — fourteen competing standards, so obviously what the world
+needs is a fifteenth — and says outright that his goal is a tool for your
+repertoire, to be broken out when it fits, not one true notation. He is equally
+plain that you should subdivide the planes however suits you: there are, in his
+words, no artifact plane police. The vocabulary here is confined to
+`src/model/taxonomy.ts` and `src/model/icons.ts` so that disagreeing with it is
+a small diff.
+
+If you plan to host this publicly or publish diagrams from it, talk to Pete
+first — GIBSEN™ is Arbitr's mark, and he may also tell you which parts we got
+wrong.
 
 ---
 
 ## The model
 
-### Four planes, plus a rail
+### Why time, and not ATT&CK tactics
 
-A diagram is divided top to bottom into the planes an incident crosses:
+The talk's argument for the X axis: ATT&CK's tactic columns imply a rough
+sequence but do not guarantee one, and nothing in a layer says technique A led
+into technique B. Without that link you cannot build a detection or a response
+around the chain. Sequencing by time restores it — and it is the axis most
+incident diagrams simply leave undefined.
+
+### Artifact planes
+
+The Y axis clusters artifacts by **where you go looking for them**. Two sets ship,
+switchable from the toolbar, and a diagram remembers which it uses.
+
+**Artifact planes** (default) — the talk's own split:
 
 | Plane | What lives there |
 | --- | --- |
-| **Cloud** | Tenants, identity providers, SaaS, buckets, OAuth grants, cloud roles |
-| **Network** | Domains, addresses, URLs, C2, DNS, mail, firewalls, VPN, shares |
-| **Hosts** | Endpoints, servers, processes, files, registry, services, accounts, malware |
-| **Operational Technology** | PLCs, HMIs, SCADA, historians, engineering workstations, safety systems |
+| Cloud | Tenants, identity, SaaS, buckets, OAuth grants |
+| External network | Domains, addresses, URLs, mail, C2, certificates |
+| Internal network | Hosts, endpoints, file servers, shares, perimeter kit |
+| Host memory | Processes, services, drivers, credentials, user context |
+| *Registry* | *Drawn on the seam — genuinely sometimes memory, sometimes disk* |
+| Host file system | Files, scripts, executables, archives, tasks, logs |
+| Operational technology | PLCs, HMIs, SCADA, historians, safety systems |
 
-Above them sits an **Adversary rail**, drawn dashed and muted. Actors,
-campaigns, tooling and exploited weaknesses are not technical planes — they are
-annotation — so the rail is visually marked as an extension of the original
-four rather than a fifth peer.
+Hosts sit in the internal network rather than in a host plane, because the talk
+lists hosts, endpoints and file servers among the *network* artifacts and
+reserves the host planes for what is found *on* a box.
 
-### Time drives the layout
+**Technical domains** — the coarser Cloud / Network / Hosts / OT split the Arbitr
+platform later shipped, which suits intelligence crossing cloud and OT.
 
-Columns are ordered time buckets. Artifacts with no timestamp get an
-`Unsequenced` column at the left, so they stay visible instead of being dropped.
+Above both sits an **Adversary rail**, drawn dashed and muted. Actors, campaigns,
+tooling and CVEs are not places you go looking for artifacts, so it is marked as
+this tool's addition rather than a peer of the real planes.
 
-Columns are **equal width, not proportional to elapsed time**. An intrusion that
-runs a 90-second exploit chain and then dwells for three weeks is unreadable to
-scale, and the sequence is the point. The real interval between columns is
-printed on the axis (`+ 2d 5h`), so nothing is concealed.
+### Nodes are things, not events
 
-Bucket size is chosen automatically — the tool coarsens from seconds up to years
-until the diagram fits a sensible column budget — and you can pin it from the
-toolbar.
+A log tells you a process did something; five logs tell you it did five things.
+The node is the **process**, and the behaviours hang off it as edges. That
+coalescing is what keeps the diagram legible.
 
-### Artifacts are records, not just boxes
-
-Every node carries the material that makes a diagram into a report:
+Every node carries the material that turns a picture into a report:
 
 - **Technical detail** — arbitrary key/value fields (hashes, ports, command lines)
 - **Forensic logs** — source, timestamp and the raw excerpt or query
-- **Analyst commentary** — why this artifact matters to the story
-- **Confidence** — `confirmed` / `probable` / `possible` / `suspected`, rendered
-  as border weight so uncertainty is visible at a glance
-- **Time basis** — `observed` / `inferred` / `unknown`; inferred times are marked
-  `~` on the node and in the report
+- **Analyst commentary** — why this artifact matters, and where the research came from
+- **Confidence** — `confirmed` / `probable` / `possible` / `suspected`, rendered as
+  border weight so uncertainty is visible at a glance
+- **Time basis** — `observed` / `inferred` / `unknown`; inferred times are marked `~`
 - **ATT&CK** tactic and technique IDs
+
+Detail lives on the node rather than on the canvas on purpose: zoom out for the
+executive summary, zoom in for the function-level notes.
+
+### Artifacts that span time
+
+Set an artifact's **Until** and it is drawn long, running across every column it
+was live for. A staged archive written at 08:00, read at 09:00 and deleted at
+14:00 is one long box with a rule to its far end, not three separate boxes.
+
+Bands are packed by interval rather than stacked per column, so spanning nodes
+share a lane whenever they do not overlap.
+
+### Triangles for many-at-once
+
+Rather than drawing one line per endpoint when a process touches hundreds, an
+artifact can stand in for the set:
+
+- **One reaching many** — a host sweeping a subnet, a process enumerating shares.
+  Drawn as a triangle widening left to right.
+- **Many reaching one** — a beacon calling the same C2 endpoint over and over.
+  Drawn narrowing, apex on the single endpoint.
+
+Both turn red when marked attacker-controlled.
+
+### Points of congruence
+
+The analytic payoff. Once the chain is laid out, the artifacts every later step
+depends on become obvious — a campaign with four lures and three payloads that
+all funnel through one signed binary reaching the internet has one real weak
+point, not seven. Kick that leg out and the whole thing falls over.
+
+The tool computes these as the **cut vertices** of the incident graph, ranks them
+by how much of the intrusion each one is holding up, rings the top few on the
+diagram, and lists them in the Markdown report with what each one severs. Toggle
+the rings with **Choke points** in the toolbar.
+
+### Behaviours
 
 Edges carry a verb (`beacons to`, `moves laterally to`, `exfiltrates to`, …),
 its own confidence and its own commentary. Behaviour families are colour-coded,
-and an edge that points **backwards in time** is drawn dashed — usually a sign
-that something needs a second look.
+and an edge pointing **backwards in time** is drawn dashed — usually a sign that
+something needs a second look.
 
 ---
 
@@ -108,39 +166,38 @@ The parser that does the most work, and the one you will correct most.
 
 - **Refangs** `hxxps://`, `[.]`, `(.)`, `[at]`, `[:]` before matching
 - Extracts URLs, emails, IPs, domains, MD5/SHA-1/SHA-256, CVEs, ATT&CK IDs,
-  registry keys, Windows paths and filenames — resolving overlaps by priority,
-  so the domain inside a URL is not also emitted on its own
+  registry keys, Windows paths and filenames — resolving overlaps by priority, so
+  the domain inside a URL is not also emitted on its own, and `HKCU\Software` is
+  not mistaken for a domain account
 - **Reads paragraphs, not lines.** Hard-wrapped reports break sentences
-  mid-clause; joining the wrap is what lets `the domain\ncontroller CORP-DC-01`
-  be recognised at all
-- The **paragraph carries the clock**, its **sentences carry the verbs**, so a
-  timestamp at the top of a paragraph anchors everything in it while each
-  behaviour is read from the clause that describes it
+  mid-clause; joining the wrap is what lets `the domain\ncontroller CORP-DC-01` be
+  recognised at all
+- The **paragraph carries the clock**, its **sentences carry the verbs**
 - Lifts assets named in prose (`workstation FIN-WS-014`, `historian PI-HIST-02`,
   `the HMI at 10.20.4.21`) and categorises them by role
-- A sentence that names no artifact — *"This is attacker-controlled C2
+- A sentence naming no artifact — *"This is attacker-controlled C2
   infrastructure."* — is treated as commentary on the rest of its paragraph
-- Later mentions **sharpen** earlier ones: an address first read as an IP
-  becomes a C2 server once a sentence says so, without forking into two nodes
+- Later mentions **sharpen** earlier ones: an address first read as an IP becomes
+  a C2 server once a sentence says so, without forking into two nodes
 
-Everything inferred is marked inferred. Nothing a regex found is ever recorded
-above `probable`.
+Everything inferred is marked inferred. Nothing a regex found is recorded above
+`probable`.
 
 ### STIX 2.x
 
 Observables and the common SDOs, `indicator` pattern strings expanded into their
-observables, `relationship` SROs mapped onto GIBSEN verbs, and `sighting`s used
-to promote a node's confidence and first-seen time. `attack-pattern` objects are
-folded into the artifacts that reference them — a technique is a property of a
+observables, `relationship` SROs mapped onto verbs, and `sighting`s used to
+promote a node's confidence and first-seen time. `attack-pattern` objects fold
+into the artifacts that reference them — a technique is a property of a
 behaviour, not a box on a plane.
 
 ### MISP
 
-Bare events, `{"Event": …}` and `{"response": […]}` envelopes. Composite
-attribute types (`filename|sha256`) are split, `to_ids` drives the
-attacker-controlled flag, MISP categories map onto ATT&CK tactics, objects
-become clusters anchored on their first attribute, and `ObjectReference` entries
-link those clusters. Galaxy clusters become actors.
+Bare events, `{"Event": …}` and `{"response": […]}` envelopes. Composite attribute
+types (`filename|sha256`) are split, `to_ids` drives the attacker-controlled flag,
+MISP categories map onto ATT&CK tactics, objects become clusters anchored on
+their first attribute, and `ObjectReference` entries link those clusters. Galaxy
+clusters become actors.
 
 ### CSV / TSV
 
@@ -153,6 +210,9 @@ relationship rows.
 | Category | `category`, `type`, `artifact_type`, `ioc_type`, `kind` |
 | Plane | `plane`, `layer`, `tier` |
 | Time | `time`, `timestamp`, `datetime`, `date`, `first_seen`, `when`, `occurred` |
+| Until | `end`, `until`, `last_seen`, `end_time`, `through`, `ended` |
+| Stands for many | `aggregate`, `many`, `stands_for`, `fan` — `fan-out` / `converge` |
+| How many | `count`, `quantity`, `how_many` |
 | Confidence | `confidence`, `certainty` — words, `high/med/low`, `0–1` or `0–100` |
 | Tactic | `tactic`, `phase`, `stage`, `kill_chain` |
 | Techniques | `technique`, `techniques`, `attack`, `mitre` |
@@ -176,12 +236,12 @@ and diffs cleanly in git.
 
 ## Merging
 
-Dropping several files on one incident merges them. Artifacts are deduped by
-category and label; the **earliest** sighting anchors the timeline, the
-**strongest** confidence wins, and commentary, techniques, log excerpts and
-sources accumulate rather than overwrite. Edges are rewritten onto whichever
-node survived, and an edge whose ends collapsed onto a single artifact is
-dropped.
+Dropping several files on one incident merges them. Artifacts dedupe by category
+and label; the **earliest** sighting anchors the timeline, the **latest** end
+extends the span, the **strongest** confidence wins, and commentary, techniques,
+log excerpts and sources accumulate rather than overwrite. Edges are rewritten
+onto whichever node survived, and an edge whose ends collapsed onto a single
+artifact is dropped.
 
 ## Exports
 
@@ -190,7 +250,7 @@ dropped.
 | **SVG** | Self-contained — no external fonts, CSS or images. Opens anywhere |
 | **PNG** | 2× raster of the same SVG |
 | **JSON** | The full incident, re-openable |
-| **Markdown** | Timeline table, behaviours, per-artifact detail with logs and commentary, and a copy-pasteable indicator appendix |
+| **Markdown** | Timeline, behaviours, points of congruence, per-artifact detail with logs and commentary, and a copy-pasteable indicator appendix |
 
 The on-screen diagram and the exported file are produced by the same renderer,
 so they cannot drift apart.
@@ -200,13 +260,14 @@ so they cannot drift apart.
 ## Editing
 
 Click any artifact to open the inspector: rename it, move it between planes,
-correct its category, set or clear its timestamp, adjust confidence, tag ATT&CK
-techniques, add technical fields and log excerpts, and write commentary.
-**Link from here…** then clicking a second artifact draws a new behaviour.
-`Delete` removes the selection, `Escape` clears it, `f` fits the diagram.
+correct its category, set its start and end times, adjust confidence, tag ATT&CK
+techniques, make it stand in for many, add technical fields and log excerpts, and
+write commentary. **Link from here…** then clicking a second artifact draws a new
+behaviour. `Delete` removes the selection, `Escape` clears it, `f` fits the
+diagram.
 
-Parser guesses are meant to be corrected. The tool's job is to save you the
-first 80% of the transcription, not to be right on its own.
+Parser guesses are meant to be corrected. The tool's job is to save you the first
+80% of the transcription, not to be right on its own.
 
 ---
 
@@ -216,33 +277,44 @@ first 80% of the transcription, not to be right on its own.
 src/
   model/       types, taxonomy, iconology, incident merge/validate, time
   ingest/      stix · misp · csv · text parsers, shared IOC + heuristic helpers
-  layout/      time bucketing, plane bands, node placement, edge routing
+  layout/      time bucketing, plane bands, interval packing, edge routing
+  analysis/    points of congruence
   render/      SVG renderer and palettes
   export/      SVG/PNG/JSON download, Markdown report
   ui/          DOM helpers, inspector panel
   main.ts      app shell: state, uploads, zoom/pan, selection
-samples/       the three sample documents (also used by the tests)
-test/          143 unit tests
+samples/       the sample documents (also used by the tests)
+test/          unit tests
 ```
 
 Adding an artifact category means editing `taxonomy.ts` and adding a glyph to
-`icons.ts`. Every parser, the layout, the renderer and the inspector pick it up
-without further changes.
+`icons.ts`. Adding a plane set is a few lines in `PLANE_SETS`. Every parser, the
+layout, the renderer and the inspector pick both up without further changes.
 
 ## Deploying
 
 `npm run build` emits a static site to `dist/` with relative asset paths, so it
-works from a subdirectory, a project-scoped GitHub Pages URL, or a plain
-`file://` open. `.github/workflows/pages.yml` deploys it on every push to the
-default branch once Pages is enabled for the repository (Settings → Pages →
-Source: GitHub Actions).
+works from a subdirectory, a project-scoped GitHub Pages URL, or a plain `file://`
+open. `.github/workflows/pages.yml` deploys it on every push to the default
+branch once Pages is enabled (Settings → Pages → Source: GitHub Actions).
+
+## Not built yet
+
+The talk's incident-response workflow is the obvious next piece: start from the
+single alert, then work **left** to source and **right** to scope, with each step
+a query you run and a node you fill in. Done properly the half-empty diagram
+becomes the status board — a supervisor can see how far the investigation has
+been scoped and hand the network half to somebody else. Today the tool builds a
+diagram from intelligence you already have; it does not yet drive that
+back-and-forth pivot.
+
+Also outstanding: **PDF is not read** — copy the text out, or paste it. Adding
+`pdf.js` to the text parser is the obvious fix.
 
 ## Caveats
 
-- **PDF is not read yet.** Copy the text out, or paste it. Adding `pdf.js` to the
-  text parser is the obvious next step.
-- The narrative parser is English-language and heuristic. It is tuned to be
-  quiet rather than clever — it would rather miss an artifact than invent one —
-  but it will still get things wrong.
+- The narrative parser is English-language and heuristic. It is tuned to be quiet
+  rather than clever — it would rather miss an artifact than invent one — but it
+  will still get things wrong.
 - All sample data is fabricated. Addresses come from the RFC 5737 and RFC 1918
   documentation ranges; the domains and hostnames are invented.

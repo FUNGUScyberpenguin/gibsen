@@ -37,6 +37,7 @@ export interface NodeInit {
   category: CategoryId;
   plane?: PlaneId;
   t?: string | null;
+  tEnd?: string | null;
   timeBasis?: TimeBasis;
   confidence?: Confidence;
   tactic?: GibsenNode['tactic'];
@@ -46,6 +47,7 @@ export interface NodeInit {
   commentary?: string;
   compromised?: boolean;
   pivot?: boolean;
+  aggregate?: GibsenNode['aggregate'];
   sources?: string[];
 }
 
@@ -59,6 +61,11 @@ export function makeNode(init: NodeInit): GibsenNode {
     category: init.category,
     plane: init.plane ?? defaultPlaneFor(init.category),
     t,
+    // An end before the start is a data error, not a zero-length artifact.
+    tEnd: (() => {
+      const end = parseTimestamp(init.tEnd);
+      return end && t && end > t ? end : null;
+    })(),
     timeBasis: init.timeBasis ?? (t ? 'observed' : 'unknown'),
     confidence: init.confidence ?? 'probable',
     tactic: init.tactic ?? null,
@@ -68,6 +75,7 @@ export function makeNode(init: NodeInit): GibsenNode {
     commentary: init.commentary ?? '',
     compromised: init.compromised ?? false,
     pivot: init.pivot ?? false,
+    aggregate: init.aggregate ?? null,
     sources: init.sources ?? [],
   };
 }
@@ -106,6 +114,7 @@ export function emptyIncident(name = 'Untitled incident'): Incident {
     summary: '',
     createdAt: now,
     updatedAt: now,
+    planeSet: 'talk',
     nodes: [],
     edges: [],
     sources: [],
@@ -130,6 +139,9 @@ function mergeNode(target: GibsenNode, incoming: GibsenNode): void {
   if (rankConfidence(incoming.confidence) < rankConfidence(target.confidence)) {
     target.confidence = incoming.confidence;
   }
+  // The artifact was live until the later of the two observations.
+  if (incoming.tEnd && (!target.tEnd || incoming.tEnd > target.tEnd)) target.tEnd = incoming.tEnd;
+  if (!target.aggregate && incoming.aggregate) target.aggregate = incoming.aggregate;
   target.compromised = target.compromised || incoming.compromised;
   target.pivot = target.pivot || incoming.pivot;
   if (!target.tactic && incoming.tactic) target.tactic = incoming.tactic;
@@ -211,6 +223,7 @@ export function parseIncident(raw: unknown): Incident {
       category: (n.category ?? 'unknown') as CategoryId,
       plane: n.plane,
       t: n.t ?? null,
+      tEnd: n.tEnd ?? null,
       timeBasis: n.timeBasis,
       confidence: n.confidence,
       tactic: n.tactic,
@@ -220,6 +233,7 @@ export function parseIncident(raw: unknown): Incident {
       commentary: n.commentary ?? '',
       compromised: n.compromised ?? false,
       pivot: n.pivot ?? false,
+      aggregate: n.aggregate ?? null,
       sources: n.sources ?? [],
     }),
     // Preserve the original id so edges keep resolving.
@@ -251,6 +265,7 @@ export function parseIncident(raw: unknown): Incident {
     summary: String(obj.summary ?? ''),
     createdAt: String(obj.createdAt ?? now),
     updatedAt: now,
+    planeSet: obj.planeSet === 'domain' ? 'domain' : 'talk',
     nodes,
     edges,
     sources: Array.isArray(obj.sources) ? (obj.sources as Incident['sources']) : [],

@@ -9,12 +9,13 @@
 
 import './styles.css';
 
-import type { GibsenEdge, GibsenNode, Incident } from './model/types';
+import type { GibsenEdge, GibsenNode, Incident, PlaneSetId } from './model/types';
 import { emptyIncident, makeEdge, mergeIngest, removeNode } from './model/incident';
 import { ingest } from './ingest';
 import type { Granularity } from './layout/layout';
 import { layout } from './layout/layout';
 import { renderDiagram } from './render/diagram';
+import { findChokePoints } from './analysis/congruence';
 import { themeByName } from './render/theme';
 import { exportJson, exportMarkdown, exportPng, exportSvg } from './export/download';
 import { renderInspector, type Selection } from './ui/inspector';
@@ -31,6 +32,8 @@ interface ViewOptions {
   showLegend: boolean;
   showEdgeLabels: boolean;
   showEmptyPlanes: boolean;
+  /** Ring the artifacts the rest of the chain depends on. */
+  showCongruence: boolean;
 }
 
 const state = {
@@ -42,6 +45,7 @@ const state = {
     showLegend: true,
     showEdgeLabels: true,
     showEmptyPlanes: false,
+    showCongruence: true,
   } as ViewOptions,
   zoom: { scale: 1, tx: 24, ty: 24 },
   linkSource: null as string | null,
@@ -74,6 +78,8 @@ const els = {
   warningsSection: byId('warnings-section'),
   warningList: byId('warning-list'),
   granularity: byId<HTMLSelectElement>('granularity'),
+  planeSet: byId<HTMLSelectElement>('plane-set'),
+  toggleCongruence: byId<HTMLInputElement>('toggle-congruence'),
   toggleLegend: byId<HTMLInputElement>('toggle-legend'),
   toggleEdgeLabels: byId<HTMLInputElement>('toggle-edge-labels'),
   toggleEmptyPlanes: byId<HTMLInputElement>('toggle-empty-planes'),
@@ -94,6 +100,17 @@ function setStatus(message: string): void {
 // Rendering
 // ---------------------------------------------------------------------------
 
+/**
+ * Artifact id -> how many others depend on it. Empty when the overlay is off,
+ * which is also what the renderer wants in order to skip the marking entirely.
+ */
+function chokePointMap(): Map<string, number> {
+  if (!state.view.showCongruence) return new Map();
+  // Beyond a handful the ring stops meaning anything, so keep it to the ones
+  // that actually hold the chain up.
+  return new Map(findChokePoints(state.incident).slice(0, 6).map((c) => [c.nodeId, c.severed]));
+}
+
 function drawDiagram(): void {
   const result = layout(state.incident, {
     granularity: state.view.granularity,
@@ -105,6 +122,7 @@ function drawDiagram(): void {
     selectedId: state.selection.kind === 'node' ? state.selection.id : null,
     showLegend: state.view.showLegend,
     showEdgeLabels: state.view.showEdgeLabels,
+    chokePoints: chokePointMap(),
     interactive: true,
   });
 
@@ -200,7 +218,13 @@ function drawWarnings(): void {
   }
 }
 
+/** Push incident-owned view state back into the toolbar controls. */
+function syncToolbar(): void {
+  els.planeSet.value = state.incident.planeSet ?? 'talk';
+}
+
 function redrawAll(): void {
+  syncToolbar();
   drawDiagram();
   drawInspector();
   drawSources();
@@ -444,6 +468,18 @@ function setupToolbar(): void {
     drawDiagram();
   });
 
+  els.planeSet.addEventListener('change', () => {
+    state.incident.planeSet = els.planeSet.value as PlaneSetId;
+    drawDiagram();
+    drawInspector();
+    setStatus(`Drawing against the ${els.planeSet.selectedOptions[0]?.text ?? 'selected'} plane set.`);
+  });
+
+  els.toggleCongruence.addEventListener('change', () => {
+    state.view.showCongruence = els.toggleCongruence.checked;
+    drawDiagram();
+  });
+
   els.toggleLegend.addEventListener('change', () => {
     state.view.showLegend = els.toggleLegend.checked;
     drawDiagram();
@@ -506,6 +542,7 @@ async function runExport(kind: string): Promise<void> {
     selectedId: null,
     showLegend: state.view.showLegend,
     showEdgeLabels: state.view.showEdgeLabels,
+    chokePoints: chokePointMap(),
     interactive: false,
   });
 

@@ -1,17 +1,56 @@
 /**
- * Core GIBSEN data model.
+ * Core data model.
  *
- * GIBSEN (Graphical Information Base for Security Event Notation) is a visual
- * language for incident narrative, devised by Pete Hay of Arbitr Security. A
- * diagram is a time-driven map of the artifacts, processes and behaviours seen
- * in one incident, laid out across technical planes.
+ * A diagram is a threat matrix: a time-driven map of the artifacts, processes
+ * and behaviours of one incident, with time along the X axis and artifact
+ * planes down the Y. The method is Pete Hay's, from "The Importance of Arts
+ * and Crafts in ThreatOps" (DEF CON 31, Packet Hacking Village); see the
+ * attribution section of the README for what is his and what is ours.
  *
  * The shapes below are the on-disk format too: `Incident` serialises directly
  * to a `.gibsen.json` file and reads back without a migration step.
  */
 
-/** Technical planes a diagram is divided into, top to bottom. */
-export type PlaneId = 'adversary' | 'cloud' | 'network' | 'host' | 'ot';
+/**
+ * Artifact planes a diagram is divided into, top to bottom. Named for where you
+ * go looking for the artifact, which is the point — the Y axis clusters things
+ * by where they are found.
+ *
+ * Two sets are in use, and both are legitimate. `PLANE_SETS` in `taxonomy.ts`
+ * defines them; a diagram picks one.
+ */
+export type PlaneId =
+  | 'adversary'
+  | 'cloud'
+  | 'network'
+  | 'host'
+  | 'ot'
+  // Subdivisions used in the original talk.
+  | 'external-network'
+  | 'internal-network'
+  | 'host-memory'
+  | 'host-registry'
+  | 'host-filesystem';
+
+/** Which family of artifact planes a diagram is drawn against. */
+export type PlaneSetId = 'domain' | 'talk';
+
+/**
+ * A node standing in for many artifacts at once, drawn as a triangle rather
+ * than a box. Saves drawing one line per endpoint when a process talks to a
+ * hundred of them.
+ *
+ * `fan-out` is one thing reaching many — a host sweeping a subnet, a process
+ * enumerating shares. `converge` is many reaching one — a beacon calling the
+ * same C2 endpoint over and over.
+ */
+export interface Aggregate {
+  kind: 'fan-out' | 'converge';
+  /** How many artifacts are being stood in for, when known. */
+  count?: number | null;
+  /** What the many are, e.g. "internal hosts", "SMB shares". */
+  of?: string;
+}
 
 /** How much an analyst is willing to stand behind an artifact or link. */
 export type Confidence = 'confirmed' | 'probable' | 'possible' | 'suspected';
@@ -157,6 +196,12 @@ export interface GibsenNode {
   plane: PlaneId;
   /** ISO 8601 timestamp; `null` means the artifact is not yet sequenced. */
   t: string | null;
+  /**
+   * When the artifact stopped being relevant. Set it and the node is drawn long,
+   * spanning the columns it was live for — a staged file written at 08:00, read
+   * at 09:00 and deleted at 14:00 is one long box, not three.
+   */
+  tEnd?: string | null;
   timeBasis: TimeBasis;
   confidence: Confidence;
   tactic?: Tactic | null;
@@ -171,6 +216,8 @@ export interface GibsenNode {
   compromised: boolean;
   /** True for the artifact the investigation started from. */
   pivot: boolean;
+  /** Set when this node stands in for many artifacts; drawn as a triangle. */
+  aggregate?: Aggregate | null;
   /** IDs of `SourceRef`s this node was derived from. */
   sources: string[];
 }
@@ -209,6 +256,8 @@ export interface Incident {
   summary: string;
   createdAt: string;
   updatedAt: string;
+  /** Which family of artifact planes this diagram is drawn against. */
+  planeSet?: PlaneSetId;
   nodes: GibsenNode[];
   edges: GibsenEdge[];
   sources: SourceRef[];

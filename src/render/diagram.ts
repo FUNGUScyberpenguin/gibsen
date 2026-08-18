@@ -7,9 +7,9 @@
  * file and rasterised to PNG without any of the three drifting apart.
  */
 
-import type { GibsenNode, Incident } from '../model/types';
-import type { LayoutResult } from '../layout/layout';
-import { COL_W, GUTTER_W, HEADER_H } from '../layout/layout';
+import type { Incident } from '../model/types';
+import type { LayoutResult, PositionedNode } from '../layout/layout';
+import { COL_W, GUTTER_W, HEADER_H, NODE_W } from '../layout/layout';
 import { CATEGORY_BY_ID, CONFIDENCE_OPACITY, PLANE_BY_ID, RELATION_BY_ID, RELATION_FAMILY_COLOR, TACTICS } from '../model/taxonomy';
 import { iconFor } from '../model/icons';
 import type { Theme } from './theme';
@@ -30,6 +30,11 @@ export interface RenderOptions {
   /** Draw the plane / confidence / behaviour key below the diagram. */
   showLegend?: boolean;
   showEdgeLabels?: boolean;
+  /**
+   * Artifact id -> how many other artifacts fall away without it. Marks the
+   * points of congruence, which is where a defender gets the most leverage.
+   */
+  chokePoints?: Map<string, number>;
   /** Tag nodes with `data-node-id` so the app can wire up clicks. */
   interactive?: boolean;
 }
@@ -65,10 +70,10 @@ function sanitiseId(color: string): string {
   return color.replace(/[^a-z0-9]/gi, '');
 }
 
-/** Colour of a node's accent bar and icon. */
-function nodeAccent(node: GibsenNode, theme: Theme): string {
-  if (node.compromised) return theme.danger;
-  return PLANE_BY_ID[node.plane]?.accent ?? theme.textMuted;
+/** Colour of a node's accent bar and icon, taken from the plane as drawn. */
+function nodeAccent(placed: PositionedNode, theme: Theme): string {
+  if (placed.node.compromised) return theme.danger;
+  return PLANE_BY_ID[placed.plane]?.accent ?? theme.textMuted;
 }
 
 export function renderDiagram(incident: Incident, result: LayoutResult, options: RenderOptions): SVGSVGElement {
@@ -78,7 +83,9 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
   const showEdgeLabels = options.showEdgeLabels ?? true;
 
   const topOffset = showTitle ? TITLE_H : 0;
-  const legendHeight = showLegend ? LEGEND_ROW_H * 3 + 34 : 0;
+  // planes, confidence, behaviour, markers — plus a tactics line when earned.
+  const legendRows = 4 + (incident.nodes.some((n) => n.tactic) ? 1 : 0);
+  const legendHeight = showLegend ? LEGEND_ROW_H * legendRows + 30 : 0;
   const totalWidth = Math.max(result.width, 620);
   const totalHeight = topOffset + result.height + legendHeight;
 
@@ -147,6 +154,22 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
   // --- plane bands ------------------------------------------------------
   const bandsGroup = el('g');
   result.bands.forEach((band, i) => {
+    if (band.boundary) {
+      // A seam, not a region: the registry is drawn on the line between memory
+      // and disk because it genuinely lives in both.
+      bandsGroup.append(
+        el('rect', { x: 0, y: band.y, width: totalWidth, height: band.height, fill: theme.bg, 'fill-opacity': 0.35 }),
+        el('line', { x1: 0, y1: band.y, x2: totalWidth, y2: band.y, stroke: band.accent, 'stroke-width': 1, 'stroke-dasharray': '6 5', 'stroke-opacity': 0.7 }),
+        el('line', { x1: 0, y1: band.y + band.height, x2: totalWidth, y2: band.y + band.height, stroke: band.accent, 'stroke-width': 1, 'stroke-dasharray': '6 5', 'stroke-opacity': 0.7 }),
+        el(
+          'text',
+          { x: 32, y: band.y + band.height / 2 + 4, fill: band.accent, 'font-size': 11, 'font-weight': 600 },
+          fitText(band.label, GUTTER_W - 44, 11, false),
+        ),
+      );
+      return;
+    }
+
     const fill = band.extension ? theme.extensionTint : i % 2 === 0 ? theme.bandTint : theme.bandTintAlt;
     bandsGroup.append(
       el('rect', {
@@ -292,9 +315,10 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
   const nodeGroup = el('g');
   for (const placed of result.nodes) {
     const { node } = placed;
-    const accent = nodeAccent(node, theme);
+    const accent = nodeAccent(placed, theme);
     const selected = options.selectedId === node.id;
     const borderOpacity = CONFIDENCE_OPACITY[node.confidence] ?? 1;
+    const severed = options.chokePoints?.get(node.id) ?? 0;
 
     const group = el('g', {
       transform: `translate(${placed.x}, ${placed.y})`,
@@ -302,32 +326,89 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       cursor: options.interactive ? 'pointer' : undefined,
     });
 
-    group.append(
-      el('title', {}, `${node.label}\n${CATEGORY_BY_ID[node.category]?.label ?? node.category}\n${node.t ?? 'unsequenced'}`),
-    );
+    const tooltip = [
+      node.label,
+      CATEGORY_BY_ID[node.category]?.label ?? node.category,
+      node.tEnd ? `${node.t} → ${node.tEnd}` : (node.t ?? 'unsequenced'),
+      severed > 0 ? `Point of congruence — ${severed} artifact(s) depend on it` : null,
+    ].filter(Boolean).join('\n');
+    group.append(el('title', {}, tooltip));
 
     if (selected) {
       group.append(
         el('rect', {
-          x: -4,
-          y: -4,
-          width: placed.w + 8,
-          height: placed.h + 8,
-          rx: 10,
-          fill: 'none',
-          stroke: theme.pivot,
-          'stroke-width': 2,
+          x: -4, y: -4, width: placed.w + 8, height: placed.h + 8, rx: 10,
+          fill: 'none', stroke: theme.pivot, 'stroke-width': 2,
         }),
       );
     }
 
+    // A point of congruence gets an outer ring, so it reads as load-bearing
+    // even when the diagram is zoomed too far out to read the labels.
+    if (severed > 0) {
+      group.append(
+        el('rect', {
+          x: -2.5, y: -2.5, width: placed.w + 5, height: placed.h + 5, rx: 9,
+          fill: 'none', stroke: theme.congruence, 'stroke-width': 1.4, 'stroke-dasharray': '3 3', 'stroke-opacity': 0.9,
+        }),
+      );
+    }
+
+    if (node.aggregate) {
+      // Many artifacts at once, drawn as one triangle rather than one line per
+      // endpoint: widening when a single thing reaches many, narrowing when
+      // many reach a single thing.
+      const w = placed.w;
+      const h = placed.h;
+      const fanOut = node.aggregate.kind === 'fan-out';
+      const d = fanOut
+        ? `M 3 ${h / 2} L ${w - 3} 4 L ${w - 3} ${h - 4} Z`
+        : `M ${w - 3} ${h / 2} L 3 4 L 3 ${h - 4} Z`;
+
+      group.append(
+        el('path', {
+          d,
+          fill: accent,
+          // A triangle stretched across the whole timeline is a legitimate
+          // thing to draw — a beacon really did run for twenty hours — but at
+          // that width a solid wedge swamps everything under it.
+          'fill-opacity': placed.spanning ? 0.07 : 0.13,
+          stroke: accent,
+          'stroke-width': node.compromised ? 1.6 : 1.2,
+          'stroke-opacity': borderOpacity,
+          'stroke-linejoin': 'round',
+          'stroke-dasharray': node.confidence === 'suspected' ? '4 3' : undefined,
+        }),
+      );
+
+      const anchorX = fanOut ? w - 12 : 12;
+      const anchor = fanOut ? 'end' : 'start';
+      const count = node.aggregate.count;
+      group.append(
+        el(
+          'text',
+          { x: anchorX, y: h / 2 - 2, fill: theme.text, 'font-size': 11, 'font-family': MONO, 'text-anchor': anchor },
+          fitText(node.label, w * 0.62, 11, true),
+        ),
+        el(
+          'text',
+          { x: anchorX, y: h / 2 + 12, fill: theme.textMuted, 'font-size': 9.5, 'text-anchor': anchor },
+          fitText(
+            [count ? `×${count}` : 'many', node.aggregate.of ?? (fanOut ? 'targets' : 'sessions')].join(' '),
+            w * 0.62,
+            9.5,
+            false,
+          ),
+        ),
+      );
+
+      nodeGroup.append(group);
+      continue;
+    }
+
     group.append(
       el('rect', {
-        x: 0,
-        y: 0,
-        width: placed.w,
-        height: placed.h,
-        rx: 7,
+        x: 0, y: 0, width: placed.w, height: placed.h, rx: 7,
         fill: theme.surface,
         stroke: node.compromised ? theme.danger : theme.border,
         'stroke-width': node.compromised ? 1.5 : 1,
@@ -338,7 +419,30 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       el('path', { d: `M 3.5 4 L 3.5 ${placed.h - 4}`, stroke: accent, 'stroke-width': 3, 'stroke-linecap': 'round' }),
     );
 
-    // Icon.
+    // An artifact that was live over a period carries a rule to its far end,
+    // so the eye reads the box as a duration rather than a very wide instant.
+    if (placed.spanning) {
+      group.append(
+        el('line', {
+          x1: NODE_W - 14, y1: placed.h - 13, x2: placed.w - 10, y2: placed.h - 13,
+          stroke: accent, 'stroke-width': 1, 'stroke-dasharray': '2 3', 'stroke-opacity': 0.65,
+        }),
+        el('line', {
+          x1: placed.w - 10, y1: placed.h - 17, x2: placed.w - 10, y2: placed.h - 9,
+          stroke: accent, 'stroke-width': 1, 'stroke-opacity': 0.65,
+        }),
+      );
+      if (node.tEnd) {
+        group.append(
+          el(
+            'text',
+            { x: placed.w - 14, y: 22, fill: theme.textMuted, 'font-size': 9, 'font-family': MONO, 'text-anchor': 'end' },
+            `until ${node.tEnd.slice(11, 16)}`,
+          ),
+        );
+      }
+    }
+
     const icon = el('g', {
       transform: 'translate(13, 9) scale(0.83)',
       fill: 'none',
@@ -354,20 +458,19 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       el(
         'text',
         { x: 38, y: 22, fill: theme.textMuted, 'font-size': 9.5, 'letter-spacing': 0.3 },
-        fitText((CATEGORY_BY_ID[node.category]?.label ?? node.category).toUpperCase(), placed.w - 60, 9.5, false),
+        fitText((CATEGORY_BY_ID[node.category]?.label ?? node.category).toUpperCase(), NODE_W - 60, 9.5, false),
       ),
       el(
         'text',
         { x: 12, y: 45, fill: theme.text, 'font-size': 12, 'font-family': MONO },
-        fitText(node.label, placed.w - 24, 12, true),
+        fitText(node.label, Math.max(placed.w, NODE_W) - 24, 12, true),
       ),
     );
 
-    // Badges along the top-right.
-    let badgeX = placed.w - 12;
+    // Badges along the top-right of the first column's worth of box.
+    let badgeX = Math.min(placed.w, NODE_W) - 12;
     if (node.pivot) {
       group.append(el('circle', { cx: badgeX, cy: 14, r: 4.2, fill: theme.pivot }));
-      group.append(el('title', {}, 'Investigation pivot'));
       badgeX -= 13;
     }
     if (node.compromised) {
@@ -386,45 +489,45 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
 
   // --- legend -----------------------------------------------------------
   if (showLegend) {
-    svg.append(renderLegend(incident, theme, totalWidth, topOffset + result.height));
+    svg.append(renderLegend(incident, result, theme, totalWidth, topOffset + result.height, options));
   }
 
   return svg;
 }
 
-function renderLegend(incident: Incident, theme: Theme, width: number, y: number): SVGGElement {
+function renderLegend(
+  incident: Incident,
+  result: LayoutResult,
+  theme: Theme,
+  width: number,
+  y: number,
+  options: RenderOptions,
+): SVGGElement {
   const group = el('g', { transform: `translate(0, ${y})` });
   group.append(el('line', { x1: 0, y1: 8, x2: width, y2: 8, stroke: theme.grid, 'stroke-width': 1 }));
 
   const row = (index: number) => 8 + 22 + index * LEGEND_ROW_H;
+  const heading = (x: number, r: number, text: string) =>
+    group.append(el('text', { x, y: row(r), fill: theme.textMuted, 'font-size': 10, 'font-weight': 600 }, text));
 
-  // Row 1: the planes present in this diagram.
-  const planes = [...new Set(incident.nodes.map((n) => n.plane))];
-  let x = 28;
-  group.append(el('text', { x, y: row(0), fill: theme.textMuted, 'font-size': 10, 'font-weight': 600 }, 'PLANES'));
-  x += 70;
-  for (const planeId of planes) {
-    const plane = PLANE_BY_ID[planeId];
-    if (!plane) continue;
+  // Row 1: the planes this diagram actually uses, in drawing order.
+  heading(28, 0, 'PLANES');
+  let x = 98;
+  for (const band of result.bands) {
     group.append(
-      el('rect', { x, y: row(0) - 8, width: 10, height: 10, rx: 2, fill: plane.accent }),
-      el('text', { x: x + 16, y: row(0), fill: theme.text, 'font-size': 10.5 }, plane.label),
+      el('rect', { x, y: row(0) - 8, width: 10, height: 10, rx: 2, fill: band.accent }),
+      el('text', { x: x + 16, y: row(0), fill: theme.text, 'font-size': 10.5 }, band.label),
     );
-    x += 26 + plane.label.length * 6;
+    x += 26 + band.label.length * 6;
   }
 
-  // Row 2: confidence ramp and the two node badges.
-  x = 28;
-  group.append(el('text', { x, y: row(1), fill: theme.textMuted, 'font-size': 10, 'font-weight': 600 }, 'CONFIDENCE'));
-  x += 70;
+  // Row 2: the confidence ramp.
+  heading(28, 1, 'CONFIDENCE');
+  x = 98;
   for (const level of ['confirmed', 'probable', 'possible', 'suspected'] as const) {
     group.append(
       el('rect', {
-        x,
-        y: row(1) - 9,
-        width: 12,
-        height: 12,
-        rx: 3,
+        x, y: row(1) - 9, width: 12, height: 12, rx: 3,
         fill: theme.surface,
         stroke: theme.border,
         'stroke-opacity': CONFIDENCE_OPACITY[level],
@@ -434,17 +537,10 @@ function renderLegend(incident: Incident, theme: Theme, width: number, y: number
     );
     x += 30 + level.length * 6;
   }
-  group.append(
-    el('circle', { cx: x + 6, cy: row(1) - 3.5, r: 4.2, fill: theme.pivot }),
-    el('text', { x: x + 16, y: row(1), fill: theme.text, 'font-size': 10.5 }, 'pivot'),
-    el('circle', { cx: x + 62, cy: row(1) - 3.5, r: 4.2, fill: theme.danger }),
-    el('text', { x: x + 72, y: row(1), fill: theme.text, 'font-size': 10.5 }, 'attacker-controlled'),
-  );
 
-  // Row 3: behaviour families actually used, plus tactic coverage.
-  x = 28;
-  group.append(el('text', { x, y: row(2), fill: theme.textMuted, 'font-size': 10, 'font-weight': 600 }, 'BEHAVIOUR'));
-  x += 70;
+  // Row 3: behaviour families in use.
+  heading(28, 2, 'BEHAVIOUR');
+  x = 98;
   const families = [...new Set(incident.edges.map((e) => RELATION_BY_ID[e.relation]?.family ?? 'generic'))];
   for (const family of families) {
     const color = RELATION_FAMILY_COLOR[family];
@@ -455,13 +551,66 @@ function renderLegend(incident: Incident, theme: Theme, width: number, y: number
     x += 34 + family.length * 6;
   }
 
+  // Row 4: the node markers, only those the diagram is actually using.
+  heading(28, 3, 'MARKERS');
+  x = 98;
+  const marker = (draw: () => void, label: string) => {
+    draw();
+    group.append(el('text', { x: x + 18, y: row(3), fill: theme.text, 'font-size': 10.5 }, label));
+    x += 26 + label.length * 6;
+  };
+
+  if (incident.nodes.some((n) => n.pivot)) {
+    marker(() => group.append(el('circle', { cx: x + 5, cy: row(3) - 3.5, r: 4.2, fill: theme.pivot })), 'pivot');
+  }
+  if (incident.nodes.some((n) => n.compromised)) {
+    marker(() => group.append(el('circle', { cx: x + 5, cy: row(3) - 3.5, r: 4.2, fill: theme.danger })), 'attacker-controlled');
+  }
+  if (incident.nodes.some((n) => n.timeBasis === 'inferred')) {
+    marker(
+      () => group.append(el('text', { x: x + 1, y: row(3) + 1, fill: theme.textMuted, 'font-size': 12 }, '~')),
+      'inferred time',
+    );
+  }
+  if (result.nodes.some((p) => p.spanning)) {
+    marker(
+      () =>
+        group.append(
+          el('rect', { x, y: row(3) - 8, width: 22, height: 10, rx: 2, fill: 'none', stroke: theme.textMuted, 'stroke-width': 1 }),
+        ),
+      'spans a period',
+    );
+    x += 6;
+  }
+  if (incident.nodes.some((n) => n.aggregate)) {
+    marker(
+      () =>
+        group.append(
+          el('path', { d: `M ${x} ${row(3) - 3.5} L ${x + 13} ${row(3) - 9} L ${x + 13} ${row(3) + 2} Z`, fill: 'none', stroke: theme.textMuted, 'stroke-width': 1.2 }),
+        ),
+      'many artifacts',
+    );
+  }
+  if (options.chokePoints && options.chokePoints.size > 0) {
+    marker(
+      () =>
+        group.append(
+          el('rect', {
+            x, y: row(3) - 9, width: 13, height: 13, rx: 3,
+            fill: 'none', stroke: theme.congruence, 'stroke-width': 1.4, 'stroke-dasharray': '3 3',
+          }),
+        ),
+      'point of congruence',
+    );
+  }
+
   const tactics = [...new Set(incident.nodes.map((n) => n.tactic).filter(Boolean))];
   if (tactics.length) {
     const names = tactics.map((t) => TACTICS.find((d) => d.id === t)?.label ?? t).join(' · ');
     group.append(
       el(
         'text',
-        { x: 28, y: row(3), fill: theme.textMuted, 'font-size': 9.5 },
+        { x: 28, y: row(4), fill: theme.textMuted, 'font-size': 9.5 },
         fitText(`Tactics observed: ${names}`, width - 56, 9.5, false),
       ),
     );

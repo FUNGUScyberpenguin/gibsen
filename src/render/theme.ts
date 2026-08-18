@@ -15,6 +15,8 @@ export interface Theme {
   extensionTint: string;
   danger: string;
   pivot: string;
+  /** Marks an artifact the rest of the chain hangs on. */
+  congruence: string;
 }
 
 export const DARK: Theme = {
@@ -31,6 +33,7 @@ export const DARK: Theme = {
   extensionTint: '#0d1424',
   danger: '#f43f5e',
   pivot: '#facc15',
+  congruence: '#a3e635',
 };
 
 export const LIGHT: Theme = {
@@ -47,6 +50,7 @@ export const LIGHT: Theme = {
   extensionTint: '#f4f1fb',
   danger: '#dc2626',
   pivot: '#b45309',
+  congruence: '#4d7c0f',
 };
 
 export function themeByName(name: string): Theme {

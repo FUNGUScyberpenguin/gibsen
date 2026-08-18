@@ -6,7 +6,7 @@
     <title>GIBSEN Studio — threat intelligence to incident diagrams</title>
     <meta
       name="description"
-      content="Upload cyber threat intelligence and get a time-driven GIBSEN incident diagram across the cloud, network, host and OT planes."
+      content="Upload cyber threat intelligence and get a time-driven incident threat matrix: artifacts and behaviours plotted across artifact planes over time."
     />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
@@ -22,6 +22,14 @@
         </div>
 
         <div class="topbar-controls">
+          <label class="inline-field">
+            <span>Planes</span>
+            <select id="plane-set">
+              <option value="talk">Artifact planes</option>
+              <option value="domain">Technical domains</option>
+            </select>
+          </label>
+
           <label class="inline-field">
             <span>Grouping</span>
             <select id="granularity">
@@ -42,6 +50,7 @@
             <label class="checkbox"><input type="checkbox" id="toggle-legend" checked /><span>Legend</span></label>
             <label class="checkbox"><input type="checkbox" id="toggle-edge-labels" checked /><span>Verbs</span></label>
             <label class="checkbox"><input type="checkbox" id="toggle-empty-planes" /><span>All planes</span></label>
+            <label class="checkbox" title="Ring the artifacts the rest of the chain depends on"><input type="checkbox" id="toggle-congruence" checked /><span>Choke points</span></label>
           </div>
 
           <button class="btn" id="btn-theme" title="Switch between the dark and light diagram palette">Light</button>
@@ -102,7 +111,7 @@
           <div class="stage" id="stage"></div>
           <div class="canvas-empty" id="canvas-empty">
             <h2>No artifacts yet</h2>
-            <p>Upload or paste threat intelligence, or load one of the samples, to build a GIBSEN diagram.</p>
+            <p>Upload or paste threat intelligence, or load one of the samples, to build a threat matrix.</p>
           </div>
           <div class="canvas-hud">
             <button class="btn btn-small" id="btn-zoom-out">−</button>
@@ -121,8 +130,9 @@
       <footer class="statusbar">
         <span id="status-text">Ready</span>
         <span class="attribution">
-          GIBSEN — Graphical Information Base for Security Event Notation — is a visual language devised by
-          Pete Hay of Arbitr Security. This is an independent implementation.
+          An independent implementation of the incident threat matrix taught by Pete Hay in
+          &ldquo;The Importance of Arts and Crafts in ThreatOps&rdquo; (DEF CON 31, Packet Hacking Village).
+          Icons and code are ours; the method is his.
         </span>
       </footer>
     </div>

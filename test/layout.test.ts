@@ -99,11 +99,12 @@ describe('layout', () => {
 
   it('hides empty planes by default and shows them on request', () => {
     const incident = build();
-    expect(layout(incident).bands.map((b) => b.plane)).toEqual(['network', 'host']);
-    expect(layout(incident, { showEmptyPlanes: true }).bands).toHaveLength(5);
+    expect(layout(incident).bands.map((b) => b.plane)).toEqual(['external-network', 'host-filesystem']);
+    expect(layout(incident, { showEmptyPlanes: true }).bands).toHaveLength(8);
+    expect(layout(incident, { planeSet: 'domain', showEmptyPlanes: true }).bands).toHaveLength(5);
   });
 
-  it('orders bands cloud → network → host → OT', () => {
+  const fourPlanes = () => {
     const incident = emptyIncident();
     incident.nodes.push(
       makeNode({ label: 'plc', category: 'plc', t: '2024-03-14T08:00:00Z' }),
@@ -111,12 +112,47 @@ describe('layout', () => {
       makeNode({ label: 'bucket', category: 'cloud-storage', t: '2024-03-14T08:00:00Z' }),
       makeNode({ label: 'dom', category: 'domain', t: '2024-03-14T08:00:00Z' }),
     );
-    const bands = layout(incident).bands;
+    return incident;
+  };
+
+  it('orders the technical-domain bands cloud → network → host → OT', () => {
+    const bands = layout(fourPlanes(), { planeSet: 'domain' }).bands;
     expect(bands.map((b) => b.plane)).toEqual(['cloud', 'network', 'host', 'ot']);
-    // Bands must not overlap, and must run top to bottom.
+  });
+
+  it("splits network and host the way the talk's artifact planes do", () => {
+    const bands = layout(fourPlanes(), { planeSet: 'talk' }).bands;
+    // A workstation is a network artifact in the talk's split, not a host plane.
+    expect(bands.map((b) => b.plane)).toEqual(['cloud', 'external-network', 'internal-network', 'ot']);
+  });
+
+  it('puts the registry on a seam between memory and disk', () => {
+    const incident = emptyIncident();
+    incident.nodes.push(
+      makeNode({ label: 'proc', category: 'process', t: '2024-03-14T08:00:00Z' }),
+      makeNode({ label: 'HKCU\\Run\\X', category: 'registry-key', t: '2024-03-14T08:00:00Z' }),
+      makeNode({ label: 'a.dll', category: 'executable', t: '2024-03-14T08:00:00Z' }),
+    );
+    const bands = layout(incident, { planeSet: 'talk' }).bands;
+    expect(bands.map((b) => b.plane)).toEqual(['host-memory', 'host-registry', 'host-filesystem']);
+    expect(bands.find((b) => b.plane === 'host-registry')?.boundary).toBe(true);
+    expect(bands.filter((b) => b.plane !== 'host-registry').every((b) => !b.boundary)).toBe(true);
+  });
+
+  it('stacks bands top to bottom without gaps or overlaps', () => {
+    const bands = layout(fourPlanes()).bands;
     for (let i = 1; i < bands.length; i += 1) {
       expect(bands[i].y).toBe(bands[i - 1].y + bands[i - 1].height);
     }
+  });
+
+  it('keeps a node in whichever plane the analyst moved it to', () => {
+    const incident = emptyIncident();
+    const node = makeNode({ label: 'odd', category: 'domain', t: '2024-03-14T08:00:00Z', plane: 'host-memory' });
+    incident.nodes.push(node);
+    expect(layout(incident, { planeSet: 'talk' }).bands.map((b) => b.plane)).toEqual(['host-memory']);
+    // That plane is not in the other set, so the category decides there instead.
+    expect(layout(incident, { planeSet: 'domain' }).bands.map((b) => b.plane)).toEqual(['network']);
   });
 
   it('stacks artifacts sharing a plane and a time bucket without overlapping', () => {
@@ -143,7 +179,7 @@ describe('layout', () => {
     const result = layout(build());
     const bandFor = new Map(result.bands.map((b) => [b.plane, b]));
     for (const placed of result.nodes) {
-      const band = bandFor.get(placed.node.plane)!;
+      const band = bandFor.get(placed.plane)!;
       expect(placed.y).toBeGreaterThanOrEqual(band.y);
       expect(placed.y + placed.h).toBeLessThanOrEqual(band.y + band.height);
     }
@@ -154,6 +190,60 @@ describe('layout', () => {
     expect(result.edges).toHaveLength(1);
     expect(result.edges[0].path).toMatch(/^M [\d.-]+ [\d.-]+ C /);
     expect(result.edges[0].retrograde).toBe(false);
+  });
+
+  it('draws an artifact with an end time across the columns it was live for', () => {
+    const incident = emptyIncident();
+    incident.nodes.push(
+      makeNode({
+        label: 'staged.zip',
+        category: 'archive',
+        t: '2024-03-14T08:00:00Z',
+        tEnd: '2024-03-14T11:00:00Z',
+      }),
+      makeNode({ label: 'other', category: 'file', t: '2024-03-14T09:00:00Z' }),
+    );
+    const result = layout(incident, { granularity: 'hour' });
+
+    // The end time earns a column of its own even though nothing starts there.
+    // 10:00 gets none, because nothing at all happened then — columns are
+    // ordered buckets that hold something, not a continuous ruler.
+    expect(result.columns.map((c) => c.key)).toEqual([
+      '2024-03-14T08:00:00.000Z',
+      '2024-03-14T09:00:00.000Z',
+      '2024-03-14T11:00:00.000Z',
+    ]);
+
+    const staged = result.nodes.find((p) => p.node.label === 'staged.zip')!;
+    expect(staged.spanning).toBe(true);
+    expect(staged.w).toBeGreaterThan(result.nodes.find((p) => p.node.label === 'other')!.w);
+  });
+
+  it('lets two artifacts share a lane when their spans do not overlap', () => {
+    const incident = emptyIncident();
+    incident.nodes.push(
+      makeNode({ label: 'early', category: 'file', t: '2024-03-14T08:00:00Z', tEnd: '2024-03-14T09:00:00Z' }),
+      makeNode({ label: 'late', category: 'file', t: '2024-03-14T11:00:00Z', tEnd: '2024-03-14T12:00:00Z' }),
+    );
+    const result = layout(incident, { granularity: 'hour' });
+    const [a, b] = result.nodes;
+    expect(a.y).toBe(b.y);
+  });
+
+  it('gives overlapping spans lanes of their own', () => {
+    const incident = emptyIncident();
+    incident.nodes.push(
+      makeNode({ label: 'one', category: 'file', t: '2024-03-14T08:00:00Z', tEnd: '2024-03-14T11:00:00Z' }),
+      makeNode({ label: 'two', category: 'file', t: '2024-03-14T09:00:00Z', tEnd: '2024-03-14T12:00:00Z' }),
+    );
+    const result = layout(incident, { granularity: 'hour' });
+    const [a, b] = result.nodes.sort((x, y) => x.y - y.y);
+    expect(b.y).toBeGreaterThanOrEqual(a.y + a.h);
+  });
+
+  it('ignores an end time that precedes the start', () => {
+    const node = makeNode({ label: 'bad', category: 'file', t: '2024-03-14T09:00:00Z', tEnd: '2024-03-14T08:00:00Z' });
+    expect(node.tEnd).toBeNull();
   });
 
   it('measures each edge span so the renderer can drop labels that will not fit', () => {
@@ -184,17 +274,26 @@ describe('layout', () => {
     expect(result.height).toBeGreaterThan(0);
   });
 
-  it('lays out the full sample spreadsheet across four planes', () => {
+  it('lays out the full sample spreadsheet across every plane it touches', () => {
     const incident = emptyIncident('Sample');
     const csv = SAMPLES.find((s) => s.id === 'csv')!;
     mergeIngest(incident, parseCsv(csv.content));
-    const result = layout(incident);
 
-    expect(result.bands.map((b) => b.plane)).toEqual(['network', 'cloud', 'host', 'ot'].sort((a, b) => {
-      const order = ['adversary', 'cloud', 'network', 'host', 'ot'];
-      return order.indexOf(a) - order.indexOf(b);
-    }));
-    expect(result.nodes).toHaveLength(incident.nodes.length);
-    expect(result.columns.length).toBeGreaterThan(1);
+    const domain = layout(incident, { planeSet: 'domain' });
+    expect(domain.bands.map((b) => b.plane)).toEqual(['cloud', 'network', 'host', 'ot']);
+
+    const talk = layout(incident, { planeSet: 'talk' });
+    expect(talk.bands.map((b) => b.plane)).toEqual([
+      'cloud',
+      'external-network',
+      'internal-network',
+      'host-memory',
+      'host-registry',
+      'host-filesystem',
+      'ot',
+    ]);
+
+    expect(talk.nodes).toHaveLength(incident.nodes.length);
+    expect(talk.columns.length).toBeGreaterThan(1);
   });
 });

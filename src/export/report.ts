@@ -9,6 +9,7 @@
 import type { Incident, GibsenNode } from '../model/types';
 import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, TACTICS } from '../model/taxonomy';
 import { timeframe } from '../model/incident';
+import { findChokePoints } from '../analysis/congruence';
 
 function tacticLabel(node: GibsenNode): string {
   if (!node.tactic) return '—';
@@ -27,7 +28,8 @@ function stamp(iso: string): string {
 
 function displayTime(node: GibsenNode): string {
   if (!node.t) return 'unsequenced';
-  return node.timeBasis === 'inferred' ? `~${stamp(node.t)}` : stamp(node.t);
+  const start = node.timeBasis === 'inferred' ? `~${stamp(node.t)}` : stamp(node.t);
+  return node.tEnd ? `${start} → ${stamp(node.tEnd)}` : start;
 }
 
 export function toMarkdownReport(incident: Incident): string {
@@ -101,6 +103,36 @@ export function toMarkdownReport(incident: Incident): string {
     lines.push('');
   }
 
+  // --- points of congruence ---------------------------------------------
+  // The part a defender acts on: the artifacts the rest of the chain hangs on.
+  const chokePoints = findChokePoints(incident, { minSevered: 1 }).slice(0, 8);
+  if (chokePoints.length) {
+    const byId = new Map(incident.nodes.map((n) => [n.id, n]));
+    lines.push('## Points of congruence', '');
+    lines.push(
+      'Artifacts the rest of the chain depends on. Breaking any one of these severs',
+      'the artifacts listed beside it, so these are where a detection or a response',
+      'action buys the most.',
+      '',
+      '| Artifact | Category | Severs | Cuts off |',
+      '| --- | --- | --- | --- |',
+    );
+    for (const point of chokePoints) {
+      const node = byId.get(point.nodeId);
+      if (!node) continue;
+      const severed = point.severedIds
+        .map((id) => byId.get(id)?.label)
+        .filter(Boolean)
+        .slice(0, 6);
+      const more = point.severedIds.length - severed.length;
+      lines.push(
+        `| \`${cell(node.label)}\` | ${CATEGORY_BY_ID[node.category]?.label ?? node.category} | ${point.severed} | ` +
+          `${severed.map((l) => `\`${cell(l as string)}\``).join(', ')}${more > 0 ? `, +${more} more` : ''} |`,
+      );
+    }
+    lines.push('');
+  }
+
   // --- artifact detail --------------------------------------------------
   const documented = incident.nodes.filter(
     (n) => n.commentary.trim() || Object.keys(n.details).length > 1 || n.logs.length || n.techniques.length,
@@ -170,7 +202,7 @@ export function toMarkdownReport(incident: Incident): string {
   lines.push(
     '---',
     '',
-    '_Diagram and report produced with GIBSEN Studio. GIBSEN (Graphical Information Base for Security Event Notation) is a visual language devised by Pete Hay of Arbitr Security._',
+    '_Produced with GIBSEN Studio, an independent implementation of the incident threat matrix taught by Pete Hay in "The Importance of Arts and Crafts in ThreatOps" (DEF CON 31, Packet Hacking Village). Not affiliated with Arbitr Security._',
   );
 
   return lines.join('\n');
