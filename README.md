@@ -331,12 +331,14 @@ repository's **default branch**. It gates on the default branch by name at run
 time rather than hardcoding `main`, so renaming the branch does not silently
 stop the deployments.
 
-**One manual step, once.** Pages has to be switched on at *Settings → Pages →
-Source: **GitHub Actions***. The workflow cannot do this for you: its
-`GITHUB_TOKEN` is allowed to deploy to an existing Pages site but not to create
-one, so `actions/configure-pages` fails with *"Resource not accessible by
-integration"* until a human flips the switch. Every push after that deploys on
-its own.
+**One setting, once.** The workflow passes `enablement: true` to
+`actions/configure-pages`, which provisions the Pages site on the first run.
+That call needs a `GITHUB_TOKEN` that may write, so if the run fails with
+*"Create Pages site failed … Resource not accessible by integration"*, set
+*Settings → Actions → General → Workflow permissions* to **Read and write
+permissions** and re-run. Turning Pages on directly at *Settings → Pages →
+Source: **GitHub Actions*** does the same job. After either, every push deploys
+on its own.
 
 To deploy somewhere else, `dist/` is the whole thing — copy it anywhere that
 serves files.
