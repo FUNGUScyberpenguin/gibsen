@@ -9,6 +9,8 @@
  * The interaction it exists for is the one the method depends on: an overview
  * you can take in at a glance, and the function-level detail one hover or click
  * away, rather than a wall of text nobody reads or a picture that says nothing.
+ * The detail opens as a modal over the diagram and then gets out of the way,
+ * which is what lets the boxes underneath stay small enough to read.
  *
  * This module is a pure string builder — it takes already-serialised SVG rather
  * than rendering it — so the whole page can be built and asserted on in a test
@@ -18,7 +20,7 @@
 import type { Incident } from '../model/types';
 import type { ChokePoint } from '../analysis/congruence';
 import type { Theme } from '../render/theme';
-import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, TACTICS } from '../model/taxonomy';
+import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, TACTICS, resolvePlane } from '../model/taxonomy';
 import { timeframe } from '../model/incident';
 
 export interface InteractiveInput {
@@ -58,6 +60,9 @@ function escapeJsonForScript(value: unknown): string {
  */
 function buildPayload(incident: Incident, chokePoints: ChokePoint[]) {
   const byId = new Map(incident.nodes.map((n) => [n.id, n]));
+  // The plane as drawn, not as stored: a registry key lands on the registry
+  // seam in the diagram and must not say "hosts" in the record beside it.
+  const planeSet = incident.planeSet ?? 'talk';
   const severedBy = new Map(chokePoints.map((c) => [c.nodeId, c]));
 
   const artifacts = incident.nodes.map((n) => {
@@ -66,7 +71,7 @@ function buildPayload(incident: Incident, chokePoints: ChokePoint[]) {
       id: n.id,
       label: n.label,
       category: CATEGORY_BY_ID[n.category]?.label ?? n.category,
-      plane: PLANE_BY_ID[n.plane]?.label ?? n.plane,
+      plane: PLANE_BY_ID[resolvePlane(n, planeSet)]?.label ?? n.plane,
       t: n.t,
       tEnd: n.tEnd ?? null,
       timeBasis: n.timeBasis,
@@ -175,16 +180,27 @@ main { cursor: grab; }
 #tooltip .tt-sub { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
 #tooltip .tt-note { font-size: 11px; margin-top: 6px; color: var(--text); }
 
-aside#detail {
-  position: absolute; top: 0; right: 0; bottom: 0; width: 380px; max-width: 92vw;
-  overflow-y: auto; padding: 16px 18px 28px;
-  background: var(--surface); border-left: 1px solid var(--border);
-  box-shadow: -12px 0 34px rgb(0 0 0 / 28%);
-  z-index: 30;
+/* The record is a modal, not a panel pinned to the diagram: the box on the
+   diagram says which artifact this is, and everything that makes it evidence
+   opens over the top and then gets out of the way again. */
+#modal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  padding: 4vh 4vw;
+  background: rgb(3 8 18 / 62%);
+}
+#detail {
+  position: relative; width: min(720px, 100%); max-height: 92vh;
+  overflow-y: auto; padding: 20px 24px 24px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+  outline: none;
 }
 #detail .close { position: absolute; top: 12px; right: 14px; padding: 2px 8px; }
-#detail h2 { margin: 0 34px 2px 0; font-size: 15px; font-family: var(--mono); word-break: break-all; }
+#detail h2 { margin: 0 34px 2px 0; font-size: 16px; font-family: var(--mono); overflow-wrap: anywhere; }
 #detail .sub { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+#detail .copy { margin-top: 10px; padding: 2px 9px; font-size: 10.5px; color: var(--muted); background: none; }
+#detail .copy:hover { color: var(--text); }
 #detail h3 {
   margin: 18px 0 7px; font-size: 10px; font-weight: 600;
   letter-spacing: .8px; text-transform: uppercase; color: var(--muted);
@@ -238,7 +254,8 @@ footer.bar span:last-child { text-align: right; }
   footer.bar span:last-child { display: none; }
 }
 @media (max-width: 760px) {
-  aside#detail { width: 100%; }
+  #modal { padding: 0; }
+  #detail { max-height: 100vh; border-radius: 0; }
   .bar .meta { display: none; }
 }
 `;
@@ -260,6 +277,7 @@ const PAGE_JS = `
   var stage = document.getElementById('stage');
   var svg = stage.querySelector('svg');
   var tooltip = document.getElementById('tooltip');
+  var modal = document.getElementById('modal');
   var detail = document.getElementById('detail');
   var search = document.getElementById('search');
   var zoomLabel = document.getElementById('zoom-label');
@@ -275,6 +293,33 @@ const PAGE_JS = `
     return node;
   }
   function groups() { return svg.querySelectorAll('[data-node-id]'); }
+  /** A value only the modal shows in full is a value worth being able to copy. */
+  function copyButton(value) {
+    var button = el('button', 'copy', 'Copy value');
+    button.addEventListener('click', function () {
+      var done = function (ok) {
+        button.textContent = ok ? 'Copied' : 'Blocked';
+        setTimeout(function () { button.textContent = 'Copy value'; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+      // file:// without a clipboard API still has the old selection trick.
+      var box = document.createElement('textarea');
+      box.value = value;
+      box.setAttribute('readonly', 'readonly');
+      box.style.position = 'fixed';
+      box.style.opacity = '0';
+      document.body.appendChild(box);
+      box.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+      document.body.removeChild(box);
+      done(ok);
+    });
+    return button;
+  }
   function when(a) {
     if (!a.t) return 'unsequenced';
     var start = (a.timeBasis === 'inferred' ? '~' : '') + a.t.replace('.000Z', 'Z');
@@ -318,7 +363,7 @@ const PAGE_JS = `
   function hit(target, selector) { return target && target.closest ? target.closest(selector) : null; }
 
   main.addEventListener('pointerdown', function (e) {
-    if (e.button !== 0 || detail.contains(e.target)) return;
+    if (e.button !== 0) return;
     moved = false;
     // A press on an artifact is a click, not a pan. Capturing the pointer here
     // would retarget the click to the canvas and the artifact would never see it.
@@ -397,6 +442,7 @@ const PAGE_JS = `
 
     detail.appendChild(el('h2', null, a.label));
     detail.appendChild(el('div', 'sub', a.category + '  \\u00b7  ' + a.plane));
+    detail.appendChild(copyButton(a.label));
 
     var badges = el('div', 'badges');
     badges.appendChild(el('span', 'badge', a.confidence));
@@ -465,8 +511,9 @@ const PAGE_JS = `
       detail.appendChild(links);
     }
 
-    detail.hidden = false;
+    modal.hidden = false;
     detail.scrollTop = 0;
+    detail.focus();
     highlight(id);
     if (history.replaceState) history.replaceState(null, '', '#' + encodeURIComponent(id));
   }
@@ -504,7 +551,9 @@ const PAGE_JS = `
       b.commentary.split(/\\n+/).forEach(function (p) { if (p.trim()) wrap.appendChild(el('p', null, p)); });
       detail.appendChild(wrap);
     }
-    detail.hidden = false;
+    modal.hidden = false;
+    detail.scrollTop = 0;
+    detail.focus();
   }
 
   function highlight(id) {
@@ -513,7 +562,7 @@ const PAGE_JS = `
     });
   }
   function clearSelection() {
-    detail.hidden = true;
+    modal.hidden = true;
     highlight(null);
     if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
   }
@@ -524,8 +573,11 @@ const PAGE_JS = `
     if (node) { selectArtifact(node.getAttribute('data-node-id')); return; }
     var edge = hit(e.target, '[data-edge-id]');
     if (edge) { selectBehaviour(edge.getAttribute('data-edge-id')); return; }
-    if (!detail.contains(e.target)) clearSelection();
+    clearSelection();
   });
+
+  // Anywhere on the dimmed backdrop closes; inside the card does not.
+  modal.addEventListener('pointerdown', function (e) { if (e.target === modal) clearSelection(); });
 
   // ---- search and filters ----------------------------------------------
   function matches(a) {
@@ -649,13 +701,16 @@ ${PAGE_CSS}</style>
 
 <main>
   <div id="stage">${svgMarkup}</div>
-  <aside id="detail" hidden></aside>
 </main>
+
+<div id="modal" hidden>
+  <div id="detail" role="dialog" aria-modal="true" aria-label="Artifact record" tabindex="-1"></div>
+</div>
 
 <div id="tooltip" hidden></div>
 
 <footer class="bar">
-  <span>Hover an artifact for a summary · click it for the full record · drag to pan, ctrl+scroll to zoom</span>
+  <span>Hover an artifact for a summary · click it to open the full record · drag to pan, ctrl+scroll to zoom · Esc closes</span>
   <span>Built with GIBSEN Studio — an independent implementation of the incident threat matrix taught by Pete Hay in &ldquo;The Importance of Arts and Crafts in ThreatOps&rdquo;.</span>
 </footer>
 

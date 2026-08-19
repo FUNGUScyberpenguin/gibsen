@@ -19,6 +19,7 @@ import { findChokePoints, type ChokePoint } from './analysis/congruence';
 import { themeByName } from './render/theme';
 import { exportInteractive, exportJson, exportMarkdown, exportPng, exportSvg } from './export/download';
 import { renderInspector, type Selection } from './ui/inspector';
+import { closeRecord, openRecord, recordIsOpen } from './ui/modal';
 import { h } from './ui/dom';
 import { SAMPLES } from './samples';
 
@@ -179,6 +180,9 @@ function drawInspector(): void {
       drawDiagram();
       drawInspector();
     },
+    openRecord(id) {
+      showRecord({ kind: 'node', id });
+    },
     beginLink(id) {
       state.linkSource = id;
       const node = state.incident.nodes.find((n) => n.id === id);
@@ -186,6 +190,19 @@ function drawInspector(): void {
       els.linkBanner.hidden = false;
     },
     select,
+  });
+}
+
+/**
+ * The full record, in a modal. The diagram keeps only what fits a box; this is
+ * where the value, the detail, the logs and the reasoning live, so opening one
+ * artifact never costs the reader the picture behind it.
+ */
+function showRecord(target: Selection): void {
+  const severed = chokePointMap();
+  openRecord(state.incident, target, {
+    edit: (selection) => select(selection),
+    severedBy: (id) => severed.get(id) ?? 0,
   });
 }
 
@@ -369,9 +386,31 @@ function setupCanvasInteraction(): void {
   els.canvas.addEventListener('pointerup', endPan);
   els.canvas.addEventListener('pointercancel', endPan);
 
+  // Selecting redraws the whole diagram, so the browser never sees two clicks
+  // land on the same element and never fires `dblclick`. Track it ourselves
+  // against the artifact id, which survives the redraw.
+  let lastHit = { id: '', at: 0 };
+  const isSecondClick = (id: string, at: number): boolean => {
+    const again = lastHit.id === id && at - lastHit.at < 450;
+    lastHit = again ? { id: '', at: 0 } : { id, at };
+    return again;
+  };
+
   // Selection, and the second half of a link gesture.
   els.canvas.addEventListener('click', (event) => {
     const target = event.target as Element;
+
+    // The "more" marker is the advertised way in: it is only drawn on the
+    // artifacts that actually have something more to show.
+    const moreEl = state.linkSource ? null : target.closest('[data-more-for]');
+    if (moreEl) {
+      const id = moreEl.getAttribute('data-more-for')!;
+      lastHit = { id: '', at: 0 };
+      select({ kind: 'node', id });
+      showRecord({ kind: 'node', id });
+      return;
+    }
+
     const nodeEl = target.closest('[data-node-id]');
     if (nodeEl) {
       const id = nodeEl.getAttribute('data-node-id')!;
@@ -380,11 +419,16 @@ function setupCanvasInteraction(): void {
         return;
       }
       select({ kind: 'node', id });
+      // A double-click anywhere on an artifact opens the same record, for
+      // anyone who never notices the marker.
+      if (isSecondClick(id, event.timeStamp)) showRecord({ kind: 'node', id });
       return;
     }
     const edgeEl = target.closest('[data-edge-id]');
     if (edgeEl) {
-      select({ kind: 'edge', id: edgeEl.getAttribute('data-edge-id')! });
+      const id = edgeEl.getAttribute('data-edge-id')!;
+      select({ kind: 'edge', id });
+      if (isSecondClick(id, event.timeStamp)) showRecord({ kind: 'edge', id });
       return;
     }
     if (!panning) select({ kind: 'none' });
@@ -589,10 +633,14 @@ function setupKeyboard(): void {
     const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 
     if (event.key === 'Escape') {
-      if (state.linkSource) cancelLink();
+      if (recordIsOpen()) closeRecord();
+      else if (state.linkSource) cancelLink();
       else if (!typing) select({ kind: 'none' });
       return;
     }
+    // The record is modal: while it is up, the diagram's own keys are not.
+    // Without this, Enter on its Close button would close and reopen it.
+    if (recordIsOpen()) return;
     if (typing) return;
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -608,6 +656,10 @@ function setupKeyboard(): void {
       }
     }
     if (event.key === 'f') fitToWindow();
+    if (event.key === 'Enter' && state.selection.kind !== 'none') {
+      showRecord(state.selection);
+      event.preventDefault();
+    }
   });
 }
 

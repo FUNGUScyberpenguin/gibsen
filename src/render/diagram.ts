@@ -12,6 +12,8 @@ import type { LayoutResult, PositionedNode } from '../layout/layout';
 import { COL_W, GUTTER_W, HEADER_H } from '../layout/layout';
 import { CATEGORY_BY_ID, CONFIDENCE_OPACITY, PLANE_BY_ID, RELATION_BY_ID, RELATION_FAMILY_COLOR, TACTICS } from '../model/taxonomy';
 import { iconFor } from '../model/icons';
+import { condenseLabel, wrapLabel } from './label';
+import { hasDeeperRecord } from '../model/record';
 import type { Theme } from './theme';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -64,36 +66,6 @@ function fitText(text: string, maxWidth: number, fontSize: number, mono: boolean
   if (text.length <= max) return text;
   if (max <= 1) return '…';
   return `${text.slice(0, max - 1)}…`;
-}
-
-/**
- * Break a label across lines, preferring the separators that already segment
- * it — a registry path or a file path reads far better broken at a backslash
- * than mid-token. Falls back to hard chunks for things like hashes.
- */
-function wrapLabel(text: string, maxChars: number, maxLines: number): string[] {
-  if (text.length <= maxChars) return [text];
-
-  const lines: string[] = [];
-  let rest = text;
-
-  while (rest.length > maxChars && lines.length < maxLines - 1) {
-    const window = rest.slice(0, maxChars + 1);
-    // Break after the last separator that still leaves a reasonable line.
-    const at = Math.max(
-      window.lastIndexOf('\\'),
-      window.lastIndexOf('/'),
-      window.lastIndexOf('.'),
-      window.lastIndexOf('-'),
-      window.lastIndexOf('_'),
-    );
-    const cut = at > maxChars * 0.4 ? at + 1 : maxChars;
-    lines.push(rest.slice(0, cut));
-    rest = rest.slice(cut);
-  }
-
-  lines.push(rest.length > maxChars ? `${rest.slice(0, maxChars - 1)}…` : rest);
-  return lines;
 }
 
 function sanitiseId(color: string): string {
@@ -343,6 +315,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
 
   // --- nodes ------------------------------------------------------------
   const nodeGroup = el('g');
+  let anyRecordMarkers = false;
   for (const placed of result.nodes) {
     const { node } = placed;
     const accent = nodeAccent(placed, theme);
@@ -423,7 +396,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
         el(
           'text',
           { x: anchorX, y: h / 2 - 2, fill: theme.text, 'font-size': 11, 'font-family': MONO, 'text-anchor': anchor },
-          fitText(node.label, labelWidth, 11, true),
+          fitText(condenseLabel(node.label, Math.floor(labelWidth / (11 * 0.601))), labelWidth, 11, true),
         ),
         el(
           'text',
@@ -497,10 +470,12 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       ),
     );
 
-    // The label gets as many lines as this incident's longest one needed, so a
-    // registry path or a hash is readable rather than elided into ambiguity.
+    // The label gets as many lines as this incident's longest one needed. Past
+    // that the middle is dropped rather than the tail, and the box earns a
+    // "more" marker — the full value is in the record, one click away.
     const labelChars = Math.floor((Math.max(placed.w, boxWidth) - 24) / (12 * 0.601));
-    wrapLabel(node.label, labelChars, result.labelLines).forEach((line, i) => {
+    const lines = wrapLabel(node.label, labelChars, result.labelLines);
+    lines.forEach((line, i) => {
       group.append(
         el(
           'text',
@@ -512,6 +487,28 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
 
     // Badges along the top-right of the first column's worth of box.
     let badgeX = Math.min(placed.w, boxWidth) - 12;
+
+    // Only on screen: on paper a "there is more" marker points nowhere, so the
+    // whole marker is one group the flat exporters can lift back out.
+    if (options.interactive && hasDeeperRecord(node, lines.join(''))) {
+      anyRecordMarkers = true;
+      const more = el('g', { 'data-more-for': node.id, cursor: 'pointer' });
+      more.append(
+        // A generous hit area first, underneath: the glyph is a few pixels wide.
+        el('rect', { x: badgeX - 12, y: 3, width: 23, height: 22, rx: 5, fill: 'transparent' }),
+        el(
+          'text',
+          {
+            x: badgeX + 1, y: 18, fill: theme.textMuted, 'font-size': 14, 'font-family': SANS,
+            'text-anchor': 'end', 'letter-spacing': 0.5,
+          },
+          '\u22ef',
+        ),
+        el('title', {}, 'Open the full record'),
+      );
+      group.append(more);
+      badgeX -= 15;
+    }
     if (node.pivot) {
       group.append(el('circle', { cx: badgeX, cy: 14, r: 4.2, fill: theme.pivot }));
       badgeX -= 13;
@@ -532,7 +529,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
 
   // --- legend -----------------------------------------------------------
   if (showLegend) {
-    svg.append(renderLegend(incident, result, theme, totalWidth, topOffset + result.height, options));
+    svg.append(renderLegend(incident, result, theme, totalWidth, topOffset + result.height, options, anyRecordMarkers));
   }
 
   return svg;
@@ -545,6 +542,8 @@ function renderLegend(
   width: number,
   y: number,
   options: RenderOptions,
+  /** Whether any box was actually given a "more in the record" marker. */
+  anyRecordMarkers: boolean,
 ): SVGGElement {
   const group = el('g', { transform: `translate(0, ${y})` });
   group.append(el('line', { x1: 0, y1: 8, x2: width, y2: 8, stroke: theme.grid, 'stroke-width': 1 }));
@@ -644,6 +643,14 @@ function renderLegend(
           }),
         ),
       'point of congruence',
+    );
+  }
+
+  // Only on screen, and only if some box actually carries one.
+  if (anyRecordMarkers) {
+    marker(
+      () => group.append(el('text', { x: x + 1, y: row(3) + 1, fill: theme.textMuted, 'font-size': 13 }, '\u22ef')),
+      'more in the record — click it',
     );
   }
 

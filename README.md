@@ -141,11 +141,33 @@ executive summary, zoom in for the function-level notes.
 
 **The diagram is never compressed to save room.** Every distinct timestamp gets
 its own column, so four steps of a delivery chain seconds apart stay four
-columns rather than collapsing into one minute. Labels wrap across up to three
-lines instead of being elided, so a registry path or a full hash stays readable.
-A wide diagram costs nothing; a diagram that has quietly stopped distinguishing
-09:14:10 from 09:14:20, or that renders a path as `…s\CurrentVersion\Ru…`,
-costs the reader the thing they came for.
+columns rather than collapsing into one minute. A wide diagram costs nothing; a
+diagram that has quietly stopped distinguishing 09:14:10 from 09:14:20 costs the
+reader the thing they came for.
+
+### The record modal
+
+The box carries what an artifact *is*. Everything that makes it evidence — the
+full value, the hashes, the command line, the log line it came out of, the
+analyst's reasoning — opens in a modal over the diagram and then gets out of the
+way again. That is what lets the boxes stay small enough to take in at a glance
+without anything being lost.
+
+- A box with more behind it carries a **`⋯` marker**. Click it, double-click the
+  artifact, press <kbd>Enter</kbd> with it selected, or use **Full record** in
+  the inspector
+- The **title is the whole value**, wrapped, never elided, with a **Copy value**
+  button beside it
+- **Connections** are clickable: walk the chain artifact by artifact without
+  losing your place
+- <kbd>Esc</kbd> or a click on the dimmed backdrop closes it; **Edit in the
+  inspector** hands the artifact back for editing
+
+Labels only get shortened when they genuinely will not fit two lines, and then
+the *middle* is dropped rather than the tail — `HKCU\…\CurrentVersion\Run\`
+`KettleUpdate` still reads as the Run key it is, where `…s\CurrentVersion\Ru…`
+reads as nothing at all. The `⋯` marker is drawn only on screen: on an exported
+SVG or PNG it would point nowhere, so the flat exporters strip it.
 
 ### Artifacts that span time
 
@@ -308,7 +330,7 @@ artifact is dropped.
 
 | Format | Notes |
 | --- | --- |
-| **Interactive page** | One self-contained `.html` — pan, zoom, hover, click through the whole record. Details below |
+| **Interactive page** | One self-contained `.html` — pan, zoom, hover, open the record modal. Details below |
 | **SVG** | Self-contained — no external fonts, CSS or images. Opens anywhere |
 | **PNG** | 2× raster of the same SVG |
 | **JSON** | The full incident, re-openable |
@@ -326,8 +348,9 @@ open it from `file://` on a machine with no internet.
 
 - **Hover** an artifact for a summary: category, plane, when, confidence, tactic,
   and the first line of the analyst's commentary
-- **Click** for the whole record — technical fields, ATT&CK, log excerpts,
-  commentary, and every behaviour touching it
+- **Click** to open the record as a modal over the diagram — the full value with
+  a copy button, technical fields, ATT&CK, log excerpts, commentary, and every
+  behaviour touching it
 - **Follow a connection** to walk the chain artifact by artifact
 - **Search** dims everything that does not match; quick filters narrow to
   attacker-controlled artifacts, points of congruence, or the unsequenced ones
@@ -349,8 +372,8 @@ Click any artifact to open the inspector: rename it, move it between planes,
 correct its category, set its start and end times, adjust confidence, tag ATT&CK
 techniques, make it stand in for many, add technical fields and log excerpts, and
 write commentary. **Link from here…** then clicking a second artifact draws a new
-behaviour. `Delete` removes the selection, `Escape` clears it, `f` fits the
-diagram.
+behaviour. `Delete` removes the selection, `Enter` opens its record, `Escape`
+closes the record or clears the selection, `f` fits the diagram.
 
 Parser guesses are meant to be corrected. The tool's job is to save you the first
 80% of the transcription, not to be right on its own.

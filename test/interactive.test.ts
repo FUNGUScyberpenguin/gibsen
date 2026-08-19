@@ -130,6 +130,27 @@ describe('buildInteractiveHtml', () => {
     expect(html).toContain(`--congruence:${DARK.congruence}`);
   });
 
+  it('opens the record as a modal over the diagram, not a panel beside it', () => {
+    const html = build();
+
+    // The card sits outside <main>, so the backdrop — not the canvas — takes
+    // the click that closes it.
+    expect(html).toContain('<div id="modal" hidden>');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).not.toContain('<aside id="detail"');
+    expect(html.indexOf('</main>')).toBeLessThan(html.indexOf('id="modal"'));
+
+    expect(html).toContain('#modal {');
+    expect(html).toContain('if (e.target === modal) clearSelection();');
+  });
+
+  it('lets a reader copy a value the diagram only shows in short', () => {
+    const html = build();
+    expect(html).toContain('Copy value');
+    // Works from file://, where the clipboard API may not be handed over.
+    expect(html).toContain("document.execCommand('copy')");
+  });
+
   it('handles an incident with nothing in it', () => {
     const html = buildInteractiveHtml({ incident: emptyIncident('Empty'), svgMarkup: SVG, theme: DARK });
     expect(html).toContain('No timestamps recorded');

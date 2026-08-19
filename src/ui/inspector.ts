@@ -23,6 +23,8 @@ export interface InspectorHandlers {
   deleteEdge(id: string): void;
   flipEdge(id: string): void;
   beginLink(id: string): void;
+  /** Open the read-only record modal for an artifact. */
+  openRecord(id: string): void;
   select(selection: Selection): void;
 }
 
@@ -370,6 +372,12 @@ function nodePanel(node: GibsenNode, incident: Incident, handlers: InspectorHand
     h(
       'div',
       { class: 'panel-actions' },
+      h('button', {
+        class: 'btn btn-primary',
+        text: 'Full record',
+        title: 'Everything about this artifact, in one modal (Enter)',
+        on: { click: () => handlers.openRecord(node.id) },
+      }),
       h('button', { class: 'btn', text: 'Link from here…', on: { click: () => handlers.beginLink(node.id) } }),
       h('button', { class: 'btn btn-danger', text: 'Delete artifact', on: { click: () => handlers.deleteNode(node.id) } }),
     ),

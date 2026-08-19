@@ -20,7 +20,7 @@ export const NODE_H = 60;
 const LABEL_LINE_H = 15;
 /** Characters that fit on one line of the label at 12px monospace. */
 const LABEL_CHARS_PER_LINE = Math.floor((NODE_W - 24) / (12 * 0.601));
-const LABEL_MAX_LINES = 3;
+const LABEL_MAX_LINES = 2;
 const COL_GAP = 34;
 const ROW_GAP = 16;
 const BAND_PAD = 20;

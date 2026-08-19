@@ -16,6 +16,8 @@ import { buildInteractiveHtml } from './interactive';
 export function serialiseSvg(svg: SVGSVGElement, keepHooks = false): string {
   const clone = svg.cloneNode(true) as SVGSVGElement;
   if (!keepHooks) {
+    // The "more" marker is an invitation to click; on a flat file it is noise.
+    clone.querySelectorAll('[data-more-for]').forEach((node) => node.remove());
     clone.querySelectorAll('[data-node-id], [data-edge-id]').forEach((node) => {
       node.removeAttribute('data-node-id');
       node.removeAttribute('data-edge-id');
