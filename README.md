@@ -1,5 +1,9 @@
 # GIBSEN Studio
 
+### ▶ **[Open the tool](https://funguscyberpenguin.github.io/gibsen/)**
+
+[![CI](https://github.com/FUNGUScyberpenguin/gibsen/actions/workflows/ci.yml/badge.svg)](https://github.com/FUNGUScyberpenguin/gibsen/actions/workflows/ci.yml)
+
 Upload cyber threat intelligence, get a time-driven incident diagram.
 
 GIBSEN Studio turns the intelligence you already have — a written report, a STIX
@@ -7,8 +11,27 @@ bundle, a MISP event, an analyst's spreadsheet — into a **threat matrix**: a m
 of the artifacts, processes and behaviours of one incident, with **time along
 the X axis** and **artifact planes down the Y**.
 
-Everything runs in the browser. Nothing is uploaded anywhere, which matters when
-the input is a live incident.
+Nothing to install and nothing to sign up for. **Everything runs in your
+browser** — there is no server side to this tool, so an incident you drop on it
+never leaves your machine. That is the point: it has to be safe to paste live
+incident data into.
+
+### Try it in thirty seconds
+
+Open the link above and click one of the three samples in the left sidebar:
+
+- **Narrative report** — a written intrusion summary. Watch prose become a
+  sequenced diagram: timestamps, hostnames, indicators and the verbs joining them.
+- **Analyst spreadsheet** — a hand-built artifact table, with artifacts that span
+  time and triangles standing in for many-at-once.
+- **STIX 2.1 bundle** — observables, relationships, an indicator pattern and a
+  sighting.
+
+Click any artifact to open its record. Load all three to watch them merge into
+one incident. Then **Export → Interactive page** for a single self-contained
+`.html` you can send to somebody.
+
+### Running it yourself
 
 ```bash
 npm install
@@ -326,19 +349,21 @@ it work unchanged from a project-pages URL like
 `https://<user>.github.io/gibsen/`, from a subdirectory on any web server, or
 from a plain `file://` open.
 
-`.github/workflows/pages.yml` builds and deploys on every push to the
-repository's **default branch**. It gates on the default branch by name at run
-time rather than hardcoding `main`, so renaming the branch does not silently
-stop the deployments.
+This repository deploys to
+**<https://funguscyberpenguin.github.io/gibsen/>** on every push to the default
+branch, via `.github/workflows/pages.yml`. The workflow gates on the default
+branch **by name at run time** rather than hardcoding `main`, so renaming the
+branch will not silently switch deployments off.
 
-**One setting, once.** The workflow passes `enablement: true` to
-`actions/configure-pages`, which provisions the Pages site on the first run.
-That call needs a `GITHUB_TOKEN` that may write, so if the run fails with
-*"Create Pages site failed … Resource not accessible by integration"*, set
-*Settings → Actions → General → Workflow permissions* to **Read and write
-permissions** and re-run. Turning Pages on directly at *Settings → Pages →
-Source: **GitHub Actions*** does the same job. After either, every push deploys
-on its own.
+**If you fork this, two settings once.** The workflow passes `enablement: true`
+to `actions/configure-pages` so the first run provisions the Pages site itself,
+but that call needs a `GITHUB_TOKEN` allowed to write. If a run fails with
+*"Create Pages site failed … Resource not accessible by integration"*, set:
+
+- *Settings → Actions → General → Workflow permissions* → **Read and write permissions**
+- *Settings → Pages → Source* → **GitHub Actions**
+
+Then re-run. After that every push deploys on its own.
 
 To deploy somewhere else, `dist/` is the whole thing — copy it anywhere that
 serves files.
