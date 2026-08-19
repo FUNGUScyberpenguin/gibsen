@@ -173,6 +173,16 @@ export function findTimestamps(text: string): { iso: string; start: number; end:
 
 /** Verb cues, longest/most specific first. */
 const RELATION_CUES: { re: RegExp; relation: RelationId }[] = [
+  // Malware internals first: these are specific enough that a looser cue
+  // further down would otherwise claim the sentence.
+  { re: /\binject(?:ed|s|ing)?\b|\bprocess hollow|\bhollow(?:ed|ing)/i, relation: 'injects-into' },
+  { re: /\bdecrypt|\bdeobfuscat|\bunpack(?:ed|s|ing)?\b|\bdecod(?:ed|es|ing) (?:the )?payload/i, relation: 'decrypts' },
+  { re: /\bspawn(?:ed|s|ing)? (?:a |an )?(?:worker |encryption |network )?thread|\bmulti-?threaded/i, relation: 'spawns-thread' },
+  { re: /\bshadow (?:cop|volume)|\bvssadmin|\bdelete shadows|\bdisabl(?:ed|es|ing) recovery|\bdestroy(?:ed|s|ing)? backups/i, relation: 'inhibits-recovery' },
+  { re: /\bcreat(?:ed|es|ing) (?:a |the )?mutex|\bmutant\b/i, relation: 'creates' },
+  // Narrow on purpose: a bare "contains" is far too common in prose to be a
+  // reliable signal, and this list is consulted first.
+  { re: /\bpacked (?:in|inside)\b|\b(?:in|inside|within) the (?:archive|zip|rar|7z)\b|\b(?:archive|zip|rar|7z) contain/i, relation: 'contains' },
   { re: /\bexfiltrat|\bstaged? for exfil|\bsiphon/i, relation: 'exfiltrates-to' },
   { re: /\bbeacon|\bcheck(?:ed|s|ing)? in\b|\bcallback/i, relation: 'beacons-to' },
   { re: /\bmoved? lateral|\blateral movement|\bpivot(?:ed|s|ing)? (?:to|into)/i, relation: 'moves-laterally-to' },

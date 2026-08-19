@@ -18,7 +18,7 @@ import type {
   Tactic,
 } from '../model/types';
 import { makeEdge, makeNode, nextId } from '../model/incident';
-import { ALL_PLANES, CATEGORIES, RELATIONS, TACTICS, matchCategory } from '../model/taxonomy';
+import { ALL_PLANES, CATEGORIES, TACTICS, matchCategory, matchRelation } from '../model/taxonomy';
 import { parseTimestamp, refineFileCategory, truncateLabel } from './common';
 
 /** RFC 4180 style splitter that tolerates quoted delimiters and newlines. */
@@ -196,10 +196,7 @@ function coerceAggregate(value: string): 'fan-out' | 'converge' | null {
 }
 
 function coerceRelation(value: string): RelationId | null {
-  const v = value.trim().toLowerCase().replace(/\s+/g, '-');
-  if (!v) return null;
-  const direct = RELATIONS.find((r) => r.id === v || r.label.replace(/\s+/g, '-') === v);
-  return direct?.id ?? null;
+  return matchRelation(value);
 }
 
 /**
@@ -264,10 +261,14 @@ export function parseCsv(text: string, options: { name?: string } = {}): IngestR
 
     // Relationship row.
     if (!label && from && to) {
+      const rawRelation = cellFor(row, 'relation');
+      if (rawRelation && !coerceRelation(rawRelation)) {
+        warnings.push(`Row ${i + 1}: behaviour "${rawRelation}" is not in the vocabulary; recorded as "related to".`);
+      }
       pendingEdges.push({
         from,
         to,
-        relation: coerceRelation(cellFor(row, 'relation')) ?? 'related-to',
+        relation: coerceRelation(rawRelation) ?? 'related-to',
         t: parseTimestamp(cellFor(row, 'time')),
         note: cellFor(row, 'commentary'),
         confidence: coerceConfidence(cellFor(row, 'confidence')) ?? 'probable',
@@ -324,10 +325,14 @@ export function parseCsv(text: string, options: { name?: string } = {}): IngestR
 
     // Some sheets mix both shapes: an artifact row that also names a parent.
     if (from && label) {
+      const rawRelation = cellFor(row, 'relation');
+      if (rawRelation && !coerceRelation(rawRelation)) {
+        warnings.push(`Row ${i + 1}: behaviour "${rawRelation}" is not in the vocabulary; recorded as "related to".`);
+      }
       pendingEdges.push({
         from,
         to: label,
-        relation: coerceRelation(cellFor(row, 'relation')) ?? 'related-to',
+        relation: coerceRelation(rawRelation) ?? 'related-to',
         t,
         note: '',
         confidence: 'probable',

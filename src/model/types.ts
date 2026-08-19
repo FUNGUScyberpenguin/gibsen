@@ -132,6 +132,13 @@ export type CategoryId =
   | 'archive'
   | 'browser'
   | 'log-source'
+  // malware internals
+  | 'thread'
+  | 'shellcode'
+  | 'mutex'
+  | 'shadow-copy'
+  | 'ransom-note'
+  | 'link-file'
   // operational technology
   | 'plc'
   | 'hmi'
@@ -171,6 +178,13 @@ export type RelationId =
   | 'persists-via'
   | 'discovers'
   | 'collects-from'
+  // malware internals
+  | 'contains'
+  | 'creates'
+  | 'decrypts'
+  | 'injects-into'
+  | 'spawns-thread'
+  | 'inhibits-recovery'
   | 'related-to';
 
 /** A pointer back to the evidence behind an artifact. */

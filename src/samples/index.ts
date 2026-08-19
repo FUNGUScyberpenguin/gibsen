@@ -3,6 +3,7 @@
 import report from '../../samples/incident-report.md?raw';
 import stix from '../../samples/stix-bundle.json?raw';
 import csv from '../../samples/artifacts.csv?raw';
+import malwarePath from '../../samples/malware-path.csv?raw';
 
 export interface Sample {
   id: string;
@@ -26,6 +27,13 @@ export const SAMPLES: Sample[] = [
     filename: 'artifacts.csv',
     description: 'Hand-built artifact table with explicit planes, tactics and relationships.',
     content: csv,
+  },
+  {
+    id: 'malware-path',
+    label: 'Malware path',
+    filename: 'malware-path.csv',
+    description: 'One binary end to end: delivery, in memory, across the wire, through to exfil and encryption.',
+    content: malwarePath,
   },
   {
     id: 'stix',

@@ -381,21 +381,25 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
         }),
       );
 
-      const anchorX = fanOut ? w - 12 : 12;
-      const anchor = fanOut ? 'end' : 'start';
+      // Label at the leading edge rather than the wide end. A triangle that
+      // spans two hours is over a thousand pixels across, and a label parked at
+      // its far end sits nowhere near the artifact it connects to.
+      const anchorX = 14;
+      const anchor = 'start';
+      const labelWidth = Math.min(w, NODE_W * 1.4) - 28;
       const count = node.aggregate.count;
       group.append(
         el(
           'text',
           { x: anchorX, y: h / 2 - 2, fill: theme.text, 'font-size': 11, 'font-family': MONO, 'text-anchor': anchor },
-          fitText(node.label, w * 0.62, 11, true),
+          fitText(node.label, labelWidth, 11, true),
         ),
         el(
           'text',
           { x: anchorX, y: h / 2 + 12, fill: theme.textMuted, 'font-size': 9.5, 'text-anchor': anchor },
           fitText(
             [count ? `×${count}` : 'many', node.aggregate.of ?? (fanOut ? 'targets' : 'sessions')].join(' '),
-            w * 0.62,
+            labelWidth,
             9.5,
             false,
           ),

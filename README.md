@@ -24,6 +24,9 @@ Open the link above and click one of the three samples in the left sidebar:
   sequenced diagram: timestamps, hostnames, indicators and the verbs joining them.
 - **Analyst spreadsheet** — a hand-built artifact table, with artifacts that span
   time and triangles standing in for many-at-once.
+- **Malware path** — one binary end to end: the lure, the shortcut, the signed
+  binary everything depends on, what gets unpacked in memory, the shadow copies
+  destroyed, the shares swept, and the exfil that happens *before* the encryption.
 - **STIX 2.1 bundle** — observables, relationships, an indicator pattern and a
   sighting.
 
@@ -168,6 +171,33 @@ The tool computes these as the **cut vertices** of the incident graph, ranks the
 by how much of the intrusion each one is holding up, rings the top few on the
 diagram, and lists them in the Markdown report with what each one severs. Toggle
 the rings with **Choke points** in the toolbar.
+
+### The malware path
+
+Breaking out how a single specimen works is its own use of the diagram: how it
+arrives — an attachment, a link, a redirect — what files are involved, what they
+do in memory and across the wire, through to exfiltration and encryption.
+
+The vocabulary covers what that walk actually needs, so the edges say what
+happened rather than shrugging:
+
+| | |
+| --- | --- |
+| Arrival | `contains` a shortcut, `delivers`, `downloads-from` |
+| On disk | `writes` / `drops` the loader, the staged archive, the ransom note |
+| In memory | `decrypts` the payload, `injects-into` a signed process, `creates` a mutex, `spawns-thread` |
+| Across the wire | `beacons-to`, `discovers` / `enumerates` shares, `connects-to` |
+| Impact | `inhibits-recovery` (shadow copies, backups), `encrypts`, `exfiltrates-to` |
+
+Categories to match: `shellcode` for a stage that never touches disk, `thread`
+for a worker, `mutex` for the single-instance guard, `shadow-copy` for what the
+ransomware destroys, `ransom-note`, and `link-file` for the shortcut that starts
+so many of these chains.
+
+Verbs are matched loosely, so `drops`, `enumerates`, `deletes-shadow-copies`,
+`unpacks-to` and `hollows` all land on the right relation. Anything genuinely
+unrecognised **warns** rather than quietly becoming "related to" — losing the
+verb is losing the only thing the edge was carrying.
 
 ### Behaviours
 

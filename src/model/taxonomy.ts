@@ -139,7 +139,7 @@ export const CATEGORIES: CategoryDef[] = [
   // ---- network ---------------------------------------------------------
   { id: 'domain', label: 'Domain', plane: 'network', aliases: ['domain', 'domain-name', 'hostname', 'fqdn'] },
   { id: 'ip-address', label: 'IP address', plane: 'network', aliases: ['ip', 'ipv4-addr', 'ipv6-addr', 'ip-dst', 'ip-src', 'address'] },
-  { id: 'url', label: 'URL', plane: 'network', aliases: ['url', 'uri', 'link'] },
+  { id: 'url', label: 'URL', plane: 'network', aliases: ['url', 'uri', 'hyperlink'] },
   { id: 'c2-server', label: 'C2 server', plane: 'network', aliases: ['c2', 'c&c', 'command-and-control', 'beacon', 'teamserver'] },
   { id: 'dns-record', label: 'DNS record', plane: 'network', aliases: ['dns', 'ns-record', 'txt-record', 'resolution'] },
   { id: 'email', label: 'Email message', plane: 'network', aliases: ['email', 'email-addr', 'message', 'phish', 'lure', 'attachment'] },
@@ -166,12 +166,20 @@ export const CATEGORIES: CategoryDef[] = [
   { id: 'credential', label: 'Credential', plane: 'host', aliases: ['credential', 'password', 'hash-dump', 'ntlm', 'kerberos', 'ticket', 'secret'] },
   { id: 'user-account', label: 'User account', plane: 'host', aliases: ['user', 'user-account', 'account', 'principal', 'sid', 'upn'] },
   { id: 'malware', label: 'Malware', plane: 'host', aliases: ['malware', 'implant', 'payload', 'loader', 'dropper', 'stealer', 'trojan'] },
-  { id: 'ransomware', label: 'Ransomware', plane: 'host', aliases: ['ransomware', 'locker', 'encryptor', 'ransom-note'] },
+  { id: 'ransomware', label: 'Ransomware', plane: 'host', aliases: ['ransomware', 'locker', 'encryptor'] },
   { id: 'backdoor', label: 'Backdoor', plane: 'host', aliases: ['backdoor', 'rat', 'remote-access-trojan', 'reverse-shell'] },
   { id: 'webshell', label: 'Web shell', plane: 'host', aliases: ['webshell', 'aspx-shell', 'jsp-shell', 'china chopper'] },
   { id: 'archive', label: 'Staged archive', plane: 'host', aliases: ['archive', 'zip', 'rar', '7z', 'staging', 'staged'] },
   { id: 'browser', label: 'Browser', plane: 'host', aliases: ['browser', 'chrome', 'firefox', 'edge-browser', 'cookie'] },
   { id: 'log-source', label: 'Log source', plane: 'host', aliases: ['log', 'sysmon', 'event-log', 'edr', 'siem', 'telemetry'] },
+
+  // ---- malware internals ----------------------------------------------
+  { id: 'thread', label: 'Thread', plane: 'host', aliases: ['thread', 'worker', 'worker-thread'] },
+  { id: 'shellcode', label: 'Shellcode', plane: 'host', aliases: ['shellcode', 'payload-blob', 'stage', 'in-memory-payload', 'blob'] },
+  { id: 'mutex', label: 'Mutex', plane: 'host', aliases: ['mutex', 'mutant', 'semaphore', 'single-instance'] },
+  { id: 'shadow-copy', label: 'Shadow copy', plane: 'host', aliases: ['shadow-copy', 'shadow-copies', 'vss', 'restore-point', 'backup'] },
+  { id: 'ransom-note', label: 'Ransom note', plane: 'host', aliases: ['ransom-note', 'ransom-notes', 'readme-note', 'extortion-note'] },
+  { id: 'link-file', label: 'Shortcut file', plane: 'host', aliases: ['link-file', 'lnk', 'shortcut', 'lnk-file'] },
 
   // ---- operational technology -----------------------------------------
   { id: 'plc', label: 'PLC', plane: 'ot', aliases: ['plc', 'programmable logic', 'controller', 'rtu'] },
@@ -232,8 +240,54 @@ export const RELATIONS: RelationDef[] = [
   { id: 'discovers', label: 'discovers', family: 'movement' },
   { id: 'collects-from', label: 'collects from', family: 'impact' },
   { id: 'encrypts', label: 'encrypts', family: 'impact' },
+  { id: 'contains', label: 'contains', family: 'generic' },
+  { id: 'creates', label: 'creates', family: 'execution' },
+  { id: 'decrypts', label: 'decrypts', family: 'execution' },
+  { id: 'injects-into', label: 'injects into', family: 'execution' },
+  { id: 'spawns-thread', label: 'spawns thread', family: 'execution' },
+  { id: 'inhibits-recovery', label: 'inhibits recovery', family: 'impact' },
   { id: 'related-to', label: 'related to', family: 'generic' },
 ];
+
+/**
+ * Wording an analyst is likely to type that means an existing relation. Without
+ * these an unrecognised verb quietly becomes "related to", which loses the one
+ * thing the edge was carrying.
+ */
+export const RELATION_ALIASES: Record<string, RelationId> = {
+  drops: 'writes',
+  dropped: 'writes',
+  'writes-to-disk': 'writes',
+  enumerates: 'discovers',
+  scans: 'discovers',
+  sweeps: 'discovers',
+  'spawns-worker': 'spawns-thread',
+  'starts-thread': 'spawns-thread',
+  'deletes-shadow-copies': 'inhibits-recovery',
+  'destroys-backups': 'inhibits-recovery',
+  'disables-recovery': 'inhibits-recovery',
+  'unpacks-to': 'decrypts',
+  deobfuscates: 'decrypts',
+  'hollows': 'injects-into',
+  'runs-in': 'injects-into',
+  launches: 'executes',
+  invokes: 'executes',
+  'reaches-out-to': 'connects-to',
+  'calls-back-to': 'beacons-to',
+  'staged-to': 'uploads-to',
+  'included-in': 'contains',
+  'packed-in': 'contains',
+};
+
+/** Resolve a written verb to a relation, accepting the aliases above. */
+export function matchRelation(raw: string | null | undefined): RelationId | null {
+  if (!raw) return null;
+  const v = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (!v) return null;
+  const direct = RELATIONS.find((r) => r.id === v || r.label.replace(/\s+/g, '-') === v);
+  if (direct) return direct.id;
+  return RELATION_ALIASES[v] ?? null;
+}
 
 export const RELATION_BY_ID: Record<RelationId, RelationDef> = Object.fromEntries(
   RELATIONS.map((r) => [r.id, r]),

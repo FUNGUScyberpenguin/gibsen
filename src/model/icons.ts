@@ -106,6 +106,25 @@ export const ICONS: Record<CategoryId, string> = {
   browser: `<path d="${WINDOW}"/><path d="${WINDOW_BAR}"/><path d="M8.4 5.2v3.9M13.4 5.2v3.9"/>`,
   'log-source': `<path d="${PAGE}"/><path d="${PAGE_FOLD}"/><path d="M9 11.6h6M9 14.2h6M9 16.8h3.6"/>`,
 
+  // ---- malware internals ----------------------------------------------
+  thread:
+    '<circle cx="12" cy="3.8" r="1.5"/><path d="M12 5.3v3.6"/>' +
+    '<path d="M12 8.9c0 3.5-4.5 3.5-4.5 6.9v3.4"/><path d="M12 8.9c0 3.5 4.5 3.5 4.5 6.9v3.4"/>' +
+    '<circle cx="7.5" cy="20.2" r="1.5"/><circle cx="16.5" cy="20.2" r="1.5"/>',
+  shellcode:
+    '<path d="M4.4 6.4h15.2v11.2H4.4Z"/>' +
+    '<path d="M7.2 9.9h2.1M11 9.9h2.1M14.8 9.9h2.1M7.2 14.1h2.1M11 14.1h2.1M14.8 14.1h2.1"/>',
+  mutex:
+    '<path d="M5.2 5.2h13.6v13.6H5.2Z"/><circle cx="12" cy="12" r="2.7"/>' +
+    '<path d="M12 5.2v2.6M12 16.2v2.6"/>',
+  'shadow-copy':
+    '<path d="M4.6 4.6h7l3.4 3.4v9.4H4.6Z" stroke-dasharray="3 2" stroke-opacity="0.6"/>' +
+    `<path d="M9 8.6h7l3.4 3.4v9.4H9Z"/><path d="M16 8.6v3.4h3.4"/>`,
+  'ransom-note': `<path d="${PAGE}"/><path d="${PAGE_FOLD}"/><path d="M12 11v3.8"/><circle cx="12" cy="17.2" r=".9"/>`,
+  'link-file':
+    `<path d="${PAGE}"/><path d="${PAGE_FOLD}"/>` +
+    '<path d="M9.2 17.6c0-2.7 1.9-4.4 4.6-4.4"/><path d="m11.5 10.9 2.5 2.3-2.5 2.3"/>',
+
   // ---- operational technology -----------------------------------------
   plc:
     '<path d="M5.4 6.4h13.2v11.2H5.4Z"/><path d="M8.4 6.4V3.6M12 6.4V3.6M15.6 6.4V3.6M8.4 17.6v2.8M12 17.6v2.8M15.6 17.6v2.8"/><path d="M8.6 10h6.8M8.6 13.4h4"/>',

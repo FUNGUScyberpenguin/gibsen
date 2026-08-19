@@ -497,3 +497,72 @@ describe('ingest dispatch', () => {
     if (outcome.kind === 'incident') expect(outcome.incident.name).toBe('Saved');
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('malware-path vocabulary', () => {
+  const malwarePath = () => parseCsv(sample('malware-path').content, { name: 'malware-path.csv' });
+
+  it('classifies every artifact in the sample', () => {
+    const result = malwarePath();
+    expect(result.warnings).toEqual([]);
+    expect(result.nodes.filter((n) => n.category === 'unknown')).toEqual([]);
+  });
+
+  it('names what the malware actually does, rather than "related to"', () => {
+    const { edges } = malwarePath();
+    const vague = edges.filter((e) => e.relation === 'related-to');
+    expect(vague).toEqual([]);
+
+    const verbs = new Set(edges.map((e) => e.relation));
+    for (const verb of ['contains', 'decrypts', 'injects-into', 'creates', 'spawns-thread', 'inhibits-recovery']) {
+      expect(verbs, `expected the path to use "${verb}"`).toContain(verb);
+    }
+  });
+
+  it('covers delivery through to encryption and exfil', () => {
+    const tactics = new Set(malwarePath().nodes.map((n) => n.tactic));
+    for (const tactic of ['initial-access', 'execution', 'defense-evasion', 'discovery', 'collection', 'command-and-control', 'exfiltration', 'impact']) {
+      expect(tactics, `expected the path to reach ${tactic}`).toContain(tactic);
+    }
+  });
+
+  it('separates what is in memory from what is on disk', () => {
+    const nodes = malwarePath().nodes;
+    // The decrypted stage never touches disk; the loader that unpacked it does.
+    expect(nodes.find((n) => n.label === 'decrypted payload')?.category).toBe('shellcode');
+    expect(nodes.find((n) => n.label === 'tickler.dll')?.category).toBe('executable');
+    expect(nodes.filter((n) => n.category === 'thread')).toHaveLength(2);
+  });
+
+  it('accepts the wording an analyst actually types', () => {
+    const csv = [
+      'artifact,from,relation',
+      'loader.dll,powershell.exe,drops',
+      'share sweep,loader.dll,enumerates',
+      'shadow copies,loader.dll,deletes-shadow-copies',
+      'payload,loader.dll,unpacks-to',
+      'svchost.exe,payload,hollows',
+    ].join('\n');
+    const relations = parseCsv(csv).edges.map((e) => e.relation);
+    expect(relations).toEqual(['writes', 'discovers', 'inhibits-recovery', 'decrypts', 'injects-into']);
+  });
+
+  it('warns rather than silently flattening a verb it does not know', () => {
+    const result = parseCsv('artifact,from,relation\nb,a,flumboozles');
+    expect(result.edges[0].relation).toBe('related-to');
+    expect(result.warnings.join(' ')).toMatch(/flumboozles.*not in the vocabulary/i);
+  });
+
+  it('files a Windows shortcut as a file, not as a URL', () => {
+    const node = parseCsv('artifact,category\nInvoice.lnk,link-file').nodes[0];
+    expect(node.category).toBe('link-file');
+    expect(node.plane).toBe('host');
+  });
+
+  it('keeps a ransom note distinct from the ransomware', () => {
+    const nodes = parseCsv('artifact,category\nREADME.txt,ransom-note\nlocker.exe,ransomware').nodes;
+    expect(nodes[0].category).toBe('ransom-note');
+    expect(nodes[1].category).toBe('ransomware');
+  });
+});
