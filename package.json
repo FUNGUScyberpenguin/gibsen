@@ -16,5 +16,8 @@
     "typescript": "^5.6.3",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.2.108"
   }
 }

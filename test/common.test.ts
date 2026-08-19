@@ -181,3 +181,59 @@ describe('label helpers', () => {
     expect(refineFileCategory('notes.txt')).toBe('file');
   });
 });
+
+describe('findTimestamps and the bare clock', () => {
+  it('resolves a clock against the date named beside it', () => {
+    const found = findTimestamps('At 09:12 on 2 March 2026 a user received a phishing email.');
+    expect(found[0].iso).toBe('2026-03-02T09:12:00.000Z');
+    expect(found[0].hasClock).toBe(true);
+  });
+
+  it('resolves a clock against the date the narrative established earlier', () => {
+    const found = findTimestamps('At 09:14 the archive was opened.', '2026-03-02');
+    expect(found).toHaveLength(1);
+    expect(found[0].iso).toBe('2026-03-02T09:14:00.000Z');
+  });
+
+  it('drops a clock when no date is in scope at all', () => {
+    // A time with no day is not a position on any timeline.
+    expect(findTimestamps('At 09:14 the archive was opened.')).toEqual([]);
+  });
+
+  it('uses the nearest preceding date when a passage spans two days', () => {
+    const found = findTimestamps(
+      'On 2026-03-02 the loader ran. At 23:50 it beaconed. On 2026-03-03 encryption began. At 01:15 the share was locked.',
+    );
+    const clocks = found.filter((f) => f.hasClock);
+    expect(clocks.map((c) => c.iso)).toEqual(['2026-03-02T23:50:00.000Z', '2026-03-03T01:15:00.000Z']);
+  });
+
+  it('requires the prose to say it is a time', () => {
+    // No cue word, no timezone: these are a port, an address and a technique.
+    expect(findTimestamps('Beaconed to 203.0.113.44 on port 443.', '2026-03-02')).toEqual([]);
+    expect(findTimestamps('A compression ratio of 3:20 was observed.', '2026-03-02')).toEqual([]);
+    expect(findTimestamps('See section 12:30 of the appendix.', '2026-03-02')).toEqual([]);
+  });
+
+  it('accepts a clock a timezone marks as one', () => {
+    const found = findTimestamps('Encryption began 14:05 UTC.', '2026-03-02');
+    expect(found[0].iso).toBe('2026-03-02T14:05:00.000Z');
+  });
+
+  it('reads a twelve-hour clock', () => {
+    expect(findTimestamps('Exfiltration started at 2:40 pm.', '2026-03-02')[0].iso).toBe('2026-03-02T14:40:00.000Z');
+    expect(findTimestamps('The lure landed at 9:12 am.', '2026-03-02')[0].iso).toBe('2026-03-02T09:12:00.000Z');
+    expect(findTimestamps('A sweep ran at 12:30 am.', '2026-03-02')[0].iso).toBe('2026-03-02T00:30:00.000Z');
+  });
+
+  it('reads both ends of a range', () => {
+    const found = findTimestamps('The beacon ran from 09:31 until 11:40.', '2026-03-02');
+    expect(found.map((f) => f.iso)).toEqual(['2026-03-02T09:31:00.000Z', '2026-03-02T11:40:00.000Z']);
+  });
+
+  it('does not let a clock overwrite the full timestamp it sits inside', () => {
+    const found = findTimestamps('At 2024-03-14T08:12:00Z the loader ran.');
+    expect(found).toHaveLength(1);
+    expect(found[0].iso).toBe('2024-03-14T08:12:00.000Z');
+  });
+});

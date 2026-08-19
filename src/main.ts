@@ -12,6 +12,7 @@ import './styles.css';
 import type { GibsenEdge, GibsenNode, Incident, PlaneSetId } from './model/types';
 import { emptyIncident, makeEdge, mergeIngest, removeNode } from './model/incident';
 import { ingest } from './ingest';
+import { extractPdfText, isPdf } from './ingest/pdf';
 import type { Granularity } from './layout/layout';
 import { layout } from './layout/layout';
 import { renderDiagram } from './render/diagram';
@@ -300,8 +301,40 @@ function addDocument(content: string, filename: string): void {
 
 async function addFiles(files: FileList | File[]): Promise<void> {
   for (const file of Array.from(files)) {
-    const text = await file.text();
-    addDocument(text, file.name);
+    const buffer = await file.arrayBuffer();
+
+    // Extensions lie; the magic number does not. Threat intelligence turns up
+    // as a PDF more often than as anything else, and the alternative to
+    // reading it here is somebody copy-pasting a report a page at a time.
+    if (isPdf(new Uint8Array(buffer.slice(0, 8)))) {
+      setStatus(`Reading ${file.name}…`);
+      try {
+        const pdf = await extractPdfText(buffer);
+        if (!pdf.text.trim()) {
+          state.warnings = [
+            `${file.name}: no text layer — this looks like a scan, so it needs OCR before the parser can read it.`,
+            ...state.warnings,
+          ].slice(0, 12);
+          drawWarnings();
+          setStatus(`${file.name} has no text to read.`);
+          continue;
+        }
+        addDocument(pdf.text, file.name.replace(/\.pdf$/i, '.txt'));
+        setStatus(
+          `${file.name}: ${pdf.pages} page${pdf.pages === 1 ? '' : 's'} read` +
+            (pdf.furnitureDropped ? `, ${pdf.furnitureDropped} header/footer lines dropped` : '') +
+            ` — ${state.incident.nodes.length} artifacts so far.`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        state.warnings = [`${file.name}: could not read the PDF — ${message}`, ...state.warnings].slice(0, 12);
+        drawWarnings();
+        setStatus(`Could not read ${file.name}.`);
+      }
+      continue;
+    }
+
+    addDocument(new TextDecoder().decode(buffer), file.name);
   }
 }
 

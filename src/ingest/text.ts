@@ -203,9 +203,17 @@ export function parseTextReport(raw: string, options: TextParseOptions = {}): In
     return node;
   };
 
+  /**
+   * The day the narrative is currently on. A report establishes a date once
+   * and then writes "at 09:14" for the rest of the section, so the date has to
+   * survive across paragraphs or every later beat loses its place on the axis.
+   */
+  let currentDate: string | null = null;
+
   // Two levels: the paragraph carries the clock, its sentences carry the verbs.
   for (const paragraph of paragraphs(text)) {
-    const paragraphStamps = findTimestamps(paragraph);
+    const paragraphStamps = findTimestamps(paragraph, currentDate);
+    if (paragraphStamps.length) currentDate = paragraphStamps[paragraphStamps.length - 1].iso.slice(0, 10);
     // An artifact counts as observed at this time when the paragraph that
     // introduced it stated a time — not merely because some earlier one did.
     const observed = paragraphStamps.length > 0;
@@ -224,8 +232,11 @@ export function parseTextReport(raw: string, options: TextParseOptions = {}): In
 
     for (const segment of sentences(paragraph)) {
       // A timestamp inside this very sentence anchors it more precisely still.
-      const own = findTimestamps(segment);
-      if (own.length) currentTime = own[0].iso;
+      const own = findTimestamps(segment, currentDate);
+      if (own.length) {
+        currentTime = own[0].iso;
+        currentDate = own[own.length - 1].iso.slice(0, 10);
+      }
 
       const tactic = guessTactic(segment);
       const malicious = looksMalicious(segment);

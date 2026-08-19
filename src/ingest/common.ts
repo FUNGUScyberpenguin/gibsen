@@ -145,9 +145,44 @@ const TIME_PATTERNS: RegExp[] = [
 
 export { parseTimestamp };
 
-/** Find every timestamp in a block of text, in order of appearance. */
-export function findTimestamps(text: string): { iso: string; start: number; end: number }[] {
-  const found: { iso: string; start: number; end: number }[] = [];
+/**
+ * A clock reading with no date attached. Reports are written this way — the
+ * date is established once and every later beat is "at 09:14" — and without
+ * this the whole intrusion collapses into a single midnight column, which
+ * throws away the one axis the diagram is built on.
+ *
+ * The lookarounds keep it off anything that merely contains a colon between
+ * digits: an address, a version, a port, a ratio.
+ */
+const CLOCK_RE = /(?<![\d:])(?<!\d\.)(?<!\d[/\-])([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?(?![\d:])(?!\.\d)(?![/\-]\d)/g;
+
+/**
+ * A bare clock is only read as a time when the prose says it is one. Reports
+ * write "at 09:14" or "09:14 UTC"; a number that just happens to look like a
+ * clock does not get a cue, and stays a number.
+ */
+const CLOCK_CUE = /(?:^|[\s(,;–—-])(?:at|around|about|by|from|until|till|through|between|and|since|approximately|approx\.?|circa|beginning|starting|ending)\s+$/i;
+const CLOCK_SUFFIX = /^\s*(?:UTC|GMT|Z|hrs?|hours|local(?:\s+time)?|[ap]\.?m\.?)\b/i;
+
+export interface FoundTime {
+  iso: string;
+  start: number;
+  end: number;
+  /** Whether the source text actually named a time of day, or only a date. */
+  hasClock: boolean;
+}
+
+/**
+ * Find every timestamp in a block of text, in order of appearance.
+ *
+ * `contextDate` is the `YYYY-MM-DD` the narrative has most recently
+ * established. Bare clock readings are resolved against the nearest date to
+ * their left — in this text if there is one, otherwise the one carried in —
+ * and are dropped entirely when no date is in scope, because a time with no
+ * day is not a position on any timeline.
+ */
+export function findTimestamps(text: string, contextDate?: string | null): FoundTime[] {
+  const found: FoundTime[] = [];
   const claimed: { start: number; end: number }[] = [];
 
   for (const re of TIME_PATTERNS) {
@@ -160,8 +195,45 @@ export function findTimestamps(text: string): { iso: string; start: number; end:
       const iso = parseTimestamp(m[0]);
       if (!iso) continue;
       claimed.push({ start, end });
-      found.push({ iso, start, end });
+      found.push({ iso, start, end, hasClock: /\d{1,2}:\d{2}/.test(m[0]) });
     }
+  }
+
+  // Dates already in this text, so a clock can be resolved against the one
+  // that precedes it rather than against whatever the document said last.
+  const dated = [...found].sort((a, b) => a.start - b.start);
+  const dateAt = (position: number): string | null => {
+    let best: string | null = dated.length ? dated[0].iso.slice(0, 10) : (contextDate ?? null);
+    for (const stamp of dated) {
+      if (stamp.start > position) break;
+      best = stamp.iso.slice(0, 10);
+    }
+    return best;
+  };
+
+  CLOCK_RE.lastIndex = 0;
+  let clock: RegExpExecArray | null;
+  while ((clock = CLOCK_RE.exec(text)) !== null) {
+    const start = clock.index;
+    const end = start + clock[0].length;
+    if (claimed.some((c) => start < c.end && end > c.start)) continue;
+
+    const before = text.slice(Math.max(0, start - 24), start);
+    const after = text.slice(end, end + 14);
+    const meridiem = after.match(CLOCK_SUFFIX)?.[0].trim().toLowerCase() ?? '';
+    if (!CLOCK_CUE.test(before) && !CLOCK_SUFFIX.test(after)) continue;
+
+    const date = dateAt(start);
+    if (!date) continue;
+
+    let hour = Number(clock[1]);
+    if (/^p/.test(meridiem) && hour < 12) hour += 12;
+    if (/^a/.test(meridiem) && hour === 12) hour = 0;
+
+    const iso = parseTimestamp(`${date}T${String(hour).padStart(2, '0')}:${clock[2]}:${clock[3] ?? '00'}`);
+    if (!iso) continue;
+    claimed.push({ start, end });
+    found.push({ iso, start, end, hasClock: true });
   }
 
   return found.sort((a, b) => a.start - b.start);

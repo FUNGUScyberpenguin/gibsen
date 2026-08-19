@@ -243,6 +243,23 @@ something needs a second look.
 Format is detected from content first and filename second, so a `.txt` holding
 a STIX bundle still reaches the STIX parser.
 
+### PDF reports
+
+Threat intelligence arrives as a PDF more often than as anything a machine wants
+to read, and the alternative is copy-pasting a vendor report a page at a time.
+Drop the PDF in and it is read directly — the text layer only; a scan needs OCR
+first and the tool says so rather than silently producing nothing.
+
+A PDF has no paragraphs, only glyphs at coordinates, so the structure is rebuilt
+before the narrative parser ever sees it: runs sharing a baseline become a line,
+a horizontal gap becomes the space the encoding left out, and a sentence running
+across a page turn stays one sentence. Running heads, feet and page numbers —
+the `TLP:CLEAR` banner on all forty pages — are detected by repetition and
+dropped, so they do not turn into artifacts.
+
+Everything happens in the browser. pdf.js is loaded on demand, so dropping a CSV
+never pays for it.
+
 ### Narrative reports (`.txt`, `.md`, or pasted)
 
 The parser that does the most work, and the one you will correct most.
@@ -256,6 +273,12 @@ The parser that does the most work, and the one you will correct most.
   mid-clause; joining the wrap is what lets `the domain\ncontroller CORP-DC-01` be
   recognised at all
 - The **paragraph carries the clock**, its **sentences carry the verbs**
+- **A bare clock reading is resolved against the date in scope.** Reports
+  establish the day once and then write *"at 09:14"* for the rest of the
+  section; without this the whole intrusion collapses into a single midnight
+  column and the diagram loses the one axis it is built on. A clock is only read
+  as a time when the prose says it is one — *at*, *from*, *until*, or a timezone
+  after it — so a port, an address or a ratio stays a number
 - Lifts assets named in prose (`workstation FIN-WS-014`, `historian PI-HIST-02`,
   `the HMI at 10.20.4.21`) and categorises them by role
 - A sentence naming no artifact — *"This is attacker-controlled C2
@@ -443,9 +466,6 @@ becomes the status board — a supervisor can see how far the investigation has
 been scoped and hand the network half to somebody else. Today the tool builds a
 diagram from intelligence you already have; it does not yet drive that
 back-and-forth pivot.
-
-Also outstanding: **PDF is not read** — copy the text out, or paste it. Adding
-`pdf.js` to the text parser is the obvious fix.
 
 ## Caveats
 
