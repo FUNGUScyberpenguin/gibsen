@@ -4,12 +4,13 @@
 
 [![CI](https://github.com/FUNGUScyberpenguin/gibsen/actions/workflows/ci.yml/badge.svg)](https://github.com/FUNGUScyberpenguin/gibsen/actions/workflows/ci.yml)
 
-Upload cyber threat intelligence, get a time-driven incident diagram.
+Upload cyber threat intelligence, get an incident you can show people.
 
-GIBSEN Studio turns the intelligence you already have — a written report, a STIX
-bundle, a MISP event, an analyst's spreadsheet — into a **threat matrix**: a map
-of the artifacts, processes and behaviours of one incident, with **time along
-the X axis** and **artifact planes down the Y**.
+GIBSEN Studio turns the intelligence you already have — a PDF, a written report,
+a STIX bundle, a MISP event, an analyst's spreadsheet — into a **threat matrix**:
+a map of the artifacts, processes and behaviours of one incident, with **time
+along the X axis** and **artifact planes down the Y**. Then it walks an audience
+through that map a beat at a time, which is the part a forty-page PDF cannot do.
 
 Nothing to install and nothing to sign up for. **Everything runs in your
 browser** — there is no server side to this tool, so an incident you drop on it
@@ -30,9 +31,12 @@ Open the link above and click one of the three samples in the left sidebar:
 - **STIX 2.1 bundle** — observables, relationships, an indicator pattern and a
   sighting.
 
-Click any artifact to open its record. Load all three to watch them merge into
-one incident. Then **Export → Interactive page** for a single self-contained
-`.html` you can send to somebody.
+Then press **Walk it through**: the diagram steps through the intrusion one beat
+at a time, holding back everything except what just happened, with a sentence
+saying what it was and how long the attacker waited. Click any artifact to open
+its full record. Load several samples to watch them merge into one incident.
+**Export → Interactive page** gives you a single self-contained `.html` — the
+walkthrough included — that you can send to somebody.
 
 ### Running it yourself
 
@@ -144,6 +148,32 @@ its own column, so four steps of a delivery chain seconds apart stay four
 columns rather than collapsing into one minute. A wide diagram costs nothing; a
 diagram that has quietly stopped distinguishing 09:14:10 from 09:14:20 costs the
 reader the thing they came for.
+
+### The walkthrough
+
+The feature the whole tool is pointed at. A finished diagram explains itself to
+the person who drew it and to nobody else; **Walk it through** is what walks
+everyone else through it.
+
+- One **beat per artifact**, in time order, lit together with the behaviour that
+  brought the story to it. Everything else is held back to a tenth of its
+  opacity, so the eye has nowhere else to go
+- Each beat is **one sentence somebody can read aloud** — *"powershell.exe writes
+  tickler.dll."* — built from the verb on the behaviour, not from a template
+- **How long the attacker waited** between beats, in words: *1 minute later*,
+  *1 hour 17 minutes later*. Dwell time is the thing an audience feels and a
+  timestamp column never conveys
+- The analyst's own commentary, verbatim, under the sentence
+- The view **pans and scales to the beat**, so nobody is hunting the screen
+- Arrow keys, space or page up/down to step — a presenter remote works — and the
+  progress track along the bottom is clickable to jump
+- The editing panels **get out of the way** for the duration: presenting is a
+  different job from building
+- An artifact that connects to nothing yet narrated is narrated as exactly that.
+  A diagram with a gap in it should read as having a gap in it
+
+It works the same in the exported page, which is what you would actually present
+from and what you hand to people afterwards.
 
 ### The record modal
 
@@ -369,6 +399,8 @@ the entire incident record and the script to explore it — **no server, no buil
 step, no network requests at all**. Attach it to a ticket, put it on a share, or
 open it from `file://` on a machine with no internet.
 
+- **Walk it through** steps an audience through the incident a beat at a time,
+  exactly as in the studio — arrow keys, space, or a presenter remote
 - **Hover** an artifact for a summary: category, plane, when, confidence, tactic,
   and the first line of the analyst's commentary
 - **Click** to open the record as a modal over the diagram — the full value with
@@ -396,7 +428,8 @@ correct its category, set its start and end times, adjust confidence, tag ATT&CK
 techniques, make it stand in for many, add technical fields and log excerpts, and
 write commentary. **Link from here…** then clicking a second artifact draws a new
 behaviour. `Delete` removes the selection, `Enter` opens its record, `Escape`
-closes the record or clears the selection, `f` fits the diagram.
+closes the record, leaves the walkthrough or clears the selection, `f` fits the
+diagram, and the arrow keys step the walkthrough.
 
 Parser guesses are meant to be corrected. The tool's job is to save you the first
 80% of the transcription, not to be right on its own.

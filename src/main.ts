@@ -21,6 +21,7 @@ import { themeByName } from './render/theme';
 import { exportInteractive, exportJson, exportMarkdown, exportPng, exportSvg } from './export/download';
 import { renderInspector, type Selection } from './ui/inspector';
 import { closeRecord, openRecord, recordIsOpen } from './ui/modal';
+import { Walkthrough } from './ui/walkthrough';
 import { h } from './ui/dom';
 import { SAMPLES } from './samples';
 
@@ -136,12 +137,75 @@ function drawDiagram(): void {
   els.stage.replaceChildren(svg);
   els.canvasEmpty.hidden = state.incident.nodes.length > 0;
   applyTransform();
+  walkthrough.refresh();
 }
 
 function applyTransform(): void {
   const { scale, tx, ty } = state.zoom;
   els.stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   els.zoomLabel.textContent = `${Math.round(scale * 100)}%`;
+}
+
+/**
+ * The guided walkthrough. Drives the view only — stepping through an incident
+ * never changes it.
+ */
+const walkthrough = new Walkthrough({
+  container: els.canvas,
+  stage: els.stage,
+  focus: focusOn,
+  onChange: (active) => {
+    // The panels are for building the diagram, not for showing it. During a
+    // walkthrough they give the whole window back to the picture.
+    document.querySelector('.app')?.classList.toggle('walking', active);
+    els.canvas.classList.toggle('walking', active);
+    byId('btn-walk').textContent = active ? 'Leave walkthrough' : 'Walk it through';
+    if (!active) setStatus('Walkthrough closed.');
+  },
+});
+
+/**
+ * Centre the view on a set of artifacts, at a scale somebody can read from
+ * across a room. Measured off the drawn elements rather than the layout, so it
+ * cannot drift out of step with what is on screen.
+ */
+function focusOn(nodeIds: string[]): void {
+  const svg = els.stage.querySelector('svg');
+  if (!svg || !nodeIds.length) return;
+
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+
+  for (const id of nodeIds) {
+    const group = svg.querySelector<SVGGraphicsElement>(`[data-node-id="${CSS.escape(id)}"]`);
+    if (!group) continue;
+    // getBBox is in the element's own coordinates and ignores the translate
+    // that puts it on the grid; getCTM is what carries it up to the diagram.
+    const box = group.getBBox();
+    const m = group.getCTM();
+    const x = m ? m.a * box.x + m.c * box.y + m.e : box.x;
+    const y = m ? m.b * box.x + m.d * box.y + m.f : box.y;
+    const w = box.width * (m ? m.a : 1);
+    const hgt = box.height * (m ? m.d : 1);
+    left = Math.min(left, x);
+    top = Math.min(top, y);
+    right = Math.max(right, x + w);
+    bottom = Math.max(bottom, y + hgt);
+  }
+  if (!Number.isFinite(left)) return;
+
+  const view = els.canvas.getBoundingClientRect();
+  // Leave room for the caption bar along the bottom.
+  const usableHeight = view.height - 190;
+  const pad = 90;
+  const fit = Math.min((view.width - pad * 2) / Math.max(right - left, 1), (usableHeight - pad) / Math.max(bottom - top, 1));
+  state.zoom.scale = Math.max(0.35, Math.min(1.25, fit));
+
+  state.zoom.tx = view.width / 2 - ((left + right) / 2) * state.zoom.scale;
+  state.zoom.ty = usableHeight / 2 - ((top + bottom) / 2) * state.zoom.scale;
+  applyTransform();
 }
 
 function drawInspector(): void {
@@ -396,6 +460,10 @@ function setupCanvasInteraction(): void {
     const target = event.target as Element;
     // Dragging a node should not pan; clicking it selects instead.
     if (target.closest('[data-node-id]') || target.closest('[data-edge-id]')) return;
+    // Nor should pressing one of the controls floating over the canvas.
+    // Capturing the pointer here would retarget the click to the canvas and
+    // the button underneath the finger would never see it.
+    if (target.closest('.canvas-hud, .walk-bar, .link-banner, .canvas-empty')) return;
     panning = true;
     originX = event.clientX - state.zoom.tx;
     originY = event.clientY - state.zoom.ty;
@@ -580,6 +648,19 @@ function setupToolbar(): void {
     drawDiagram();
   });
 
+  byId('btn-walk').addEventListener('click', () => {
+    if (walkthrough.active) {
+      walkthrough.stop();
+      return;
+    }
+    if (!walkthrough.start(state.incident)) {
+      setStatus('Nothing to walk through yet — load some intelligence first.');
+      return;
+    }
+    select({ kind: 'none' });
+    setStatus('Walkthrough — arrow keys or space to step, Esc to leave.');
+  });
+
   byId('btn-fit').addEventListener('click', fitToWindow);
   byId('btn-zoom-in').addEventListener('click', () => {
     const rect = els.canvas.getBoundingClientRect();
@@ -667,6 +748,7 @@ function setupKeyboard(): void {
 
     if (event.key === 'Escape') {
       if (recordIsOpen()) closeRecord();
+      else if (walkthrough.active) walkthrough.stop();
       else if (state.linkSource) cancelLink();
       else if (!typing) select({ kind: 'none' });
       return;
@@ -675,6 +757,21 @@ function setupKeyboard(): void {
     // Without this, Enter on its Close button would close and reopen it.
     if (recordIsOpen()) return;
     if (typing) return;
+
+    // Stepping keys, so the walkthrough can be driven from a presenter remote
+    // as well as from the buttons.
+    if (walkthrough.active) {
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === ' ' || event.key === 'PageDown') {
+        walkthrough.step(1);
+        event.preventDefault();
+        return;
+      }
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
+        walkthrough.step(-1);
+        event.preventDefault();
+        return;
+      }
+    }
 
     if (event.key === 'Delete' || event.key === 'Backspace') {
       if (state.selection.kind === 'node') {

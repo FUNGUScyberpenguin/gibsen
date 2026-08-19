@@ -22,6 +22,7 @@ import type { ChokePoint } from '../analysis/congruence';
 import type { Theme } from '../render/theme';
 import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, TACTICS, resolvePlane } from '../model/taxonomy';
 import { timeframe } from '../model/incident';
+import { buildStory } from '../model/story';
 
 export interface InteractiveInput {
   incident: Incident;
@@ -118,7 +119,7 @@ function buildPayload(incident: Incident, chokePoints: ChokePoint[]) {
     commentary: e.commentary ?? '',
   }));
 
-  return { artifacts, behaviours };
+  return { artifacts, behaviours, story: buildStory(incident) };
 }
 
 const PAGE_CSS = `
@@ -179,6 +180,37 @@ main { cursor: grab; }
 #tooltip .tt-label { font-family: var(--mono); font-size: 12px; word-break: break-all; }
 #tooltip .tt-sub { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
 #tooltip .tt-note { font-size: 11px; margin-top: 6px; color: var(--text); }
+
+/* Walking the incident holds the rest of the diagram back so the eye knows
+   where to look, and says in a sentence what just happened. */
+#stage svg.walking [data-node-id],
+#stage svg.walking [data-edge-id] { opacity: .1; transition: opacity .18s ease; }
+#stage svg.walking [data-node-id].lit,
+#stage svg.walking [data-edge-id].lit { opacity: 1; }
+
+#walkbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 45;
+  padding: 14px 20px 16px;
+  background: var(--surface); border-top: 1px solid var(--border);
+  box-shadow: 0 -18px 34px rgb(0 0 0 / 40%);
+}
+#walkbar .head { display: flex; align-items: baseline; gap: 12px; font-size: 11px; color: var(--muted); }
+#walkbar .count { font-family: var(--mono); color: var(--accent); }
+#walkbar .when { font-family: var(--mono); }
+#walkbar .since { color: var(--congruence); }
+#walkbar .grow { flex: 1; }
+/* Big enough to read from the back of a room, because that is where it is read. */
+#walkbar .sentence { margin: 8px 0 0; font-size: 17px; line-height: 1.45; overflow-wrap: anywhere; }
+#walkbar .note { margin: 6px 0 0; max-width: 90ch; font-size: 13px; line-height: 1.55; color: var(--muted); }
+#walkbar .controls { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+#walkbar .track { display: flex; flex: 1; gap: 2px; min-width: 0; }
+#walkbar .tick {
+  flex: 1; min-width: 2px; height: 6px; padding: 0;
+  background: var(--border); border: none; border-radius: 3px;
+}
+#walkbar .tick:hover { background: var(--muted); }
+#walkbar .tick.done { background: var(--accent); opacity: .55; }
+#walkbar .tick.now { background: var(--accent); height: 10px; opacity: 1; }
 
 /* The record is a modal, not a panel pinned to the diagram: the box on the
    diagram says which artifact this is, and everything that makes it evidence
@@ -254,6 +286,8 @@ footer.bar span:last-child { text-align: right; }
   footer.bar span:last-child { display: none; }
 }
 @media (max-width: 760px) {
+  #walkbar .sentence { font-size: 15px; }
+  #walkbar .note { display: none; }
   #modal { padding: 0; }
   #detail { max-height: 100vh; border-radius: 0; }
   .bar .meta { display: none; }
@@ -363,7 +397,7 @@ const PAGE_JS = `
   function hit(target, selector) { return target && target.closest ? target.closest(selector) : null; }
 
   main.addEventListener('pointerdown', function (e) {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || walkbar.contains(e.target)) return;
     moved = false;
     // A press on an artifact is a click, not a pan. Capturing the pointer here
     // would retarget the click to the canvas and the artifact would never see it.
@@ -579,6 +613,127 @@ const PAGE_JS = `
   // Anywhere on the dimmed backdrop closes; inside the card does not.
   modal.addEventListener('pointerdown', function (e) { if (e.target === modal) clearSelection(); });
 
+  // ---- walkthrough ------------------------------------------------------
+  // The reason the page exists: an incident somebody can be shown rather than
+  // handed. One beat at a time, the rest of the diagram held back, and a
+  // sentence underneath saying what just happened.
+  var walkbar = document.getElementById('walkbar');
+  var walkButton = document.getElementById('walk');
+  var story = DATA.story || [];
+  var beatAt = -1;
+
+  function walking() { return beatAt >= 0; }
+
+  function focusOn(ids) {
+    var left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    ids.forEach(function (id) {
+      var g = svg.querySelector('[data-node-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+      if (!g) return;
+      // getBBox is in the element's own coordinates and ignores the translate
+      // that puts it on the grid; getCTM is what carries it up to the diagram.
+      var box = g.getBBox();
+      var m = g.getCTM();
+      var x = m ? m.a * box.x + m.c * box.y + m.e : box.x;
+      var y = m ? m.b * box.x + m.d * box.y + m.f : box.y;
+      var w = box.width * (m ? m.a : 1);
+      var h = box.height * (m ? m.d : 1);
+      left = Math.min(left, x); top = Math.min(top, y);
+      right = Math.max(right, x + w); bottom = Math.max(bottom, y + h);
+    });
+    if (!isFinite(left)) return;
+
+    var rect = main.getBoundingClientRect();
+    var usable = rect.height - walkbar.offsetHeight - 24;
+    var pad = 90;
+    var fit = Math.min((rect.width - pad * 2) / Math.max(right - left, 1), (usable - pad) / Math.max(bottom - top, 1));
+    view.scale = Math.max(0.35, Math.min(1.25, fit));
+    view.x = rect.width / 2 - ((left + right) / 2) * view.scale;
+    view.y = usable / 2 - ((top + bottom) / 2) * view.scale;
+    applyView();
+  }
+
+  function paintBeat() {
+    var beat = story[beatAt];
+    var lit = {};
+    beat.focusIds.forEach(function (id) { lit[id] = true; });
+
+    svg.classList.add('walking');
+    Array.prototype.forEach.call(groups(), function (g) {
+      g.classList.toggle('lit', !!lit[g.getAttribute('data-node-id')]);
+    });
+    Array.prototype.forEach.call(svg.querySelectorAll('[data-edge-id]'), function (g) {
+      g.classList.toggle('lit', g.getAttribute('data-edge-id') === beat.edgeId);
+    });
+
+    walkbar.replaceChildren();
+    var head = el('div', 'head');
+    head.appendChild(el('span', 'count', (beatAt + 1) + ' / ' + story.length));
+    head.appendChild(el('span', 'when', beat.t ? beat.t.replace('.000Z', 'Z') : 'no time recorded'));
+    if (beat.since) head.appendChild(el('span', 'since', beat.since));
+    head.appendChild(el('span', 'grow'));
+    var leave = el('button', null, 'Leave the walkthrough');
+    leave.addEventListener('click', stopWalk);
+    head.appendChild(leave);
+    walkbar.appendChild(head);
+
+    walkbar.appendChild(el('p', 'sentence', beat.sentence));
+    if (beat.commentary) walkbar.appendChild(el('p', 'note', beat.commentary));
+
+    var controls = el('div', 'controls');
+    var back = el('button', null, '\u2190 Back');
+    back.disabled = beatAt === 0;
+    back.addEventListener('click', function () { stepWalk(-1); });
+    controls.appendChild(back);
+
+    var track = el('div', 'track');
+    story.forEach(function (b, i) {
+      var tick = el('button', 'tick' + (i === beatAt ? ' now' : i < beatAt ? ' done' : ''));
+      tick.title = (i + 1) + '. ' + b.sentence;
+      tick.addEventListener('click', function () { goToBeat(i); });
+      track.appendChild(tick);
+    });
+    controls.appendChild(track);
+
+    var next = el('button', null, beatAt === story.length - 1 ? 'Finish' : 'Next \u2192');
+    next.addEventListener('click', function () {
+      if (beatAt === story.length - 1) stopWalk(); else stepWalk(1);
+    });
+    controls.appendChild(next);
+    walkbar.appendChild(controls);
+
+    focusOn(beat.focusIds);
+  }
+
+  function goToBeat(index) {
+    if (!walking() || index < 0 || index >= story.length) return;
+    beatAt = index;
+    paintBeat();
+  }
+  function stepWalk(delta) { goToBeat(beatAt + delta); }
+
+  function startWalk() {
+    if (!story.length) return;
+    clearSelection();
+    beatAt = 0;
+    walkbar.hidden = false;
+    walkButton.textContent = 'Leave walkthrough';
+    walkButton.setAttribute('aria-pressed', 'true');
+    paintBeat();
+  }
+  function stopWalk() {
+    if (!walking()) return;
+    beatAt = -1;
+    walkbar.hidden = true;
+    walkButton.textContent = 'Walk it through';
+    walkButton.setAttribute('aria-pressed', 'false');
+    svg.classList.remove('walking');
+    Array.prototype.forEach.call(svg.querySelectorAll('.lit'), function (g) { g.classList.remove('lit'); });
+    fit();
+  }
+
+  if (!story.length) walkButton.hidden = true;
+  walkButton.addEventListener('click', function () { walking() ? stopWalk() : startWalk(); });
+
   // ---- search and filters ----------------------------------------------
   function matches(a) {
     var q = search.value.trim().toLowerCase();
@@ -610,10 +765,25 @@ const PAGE_JS = `
   // ---- keyboard ---------------------------------------------------------
   document.addEventListener('keydown', function (e) {
     var typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
-    if (e.key === 'Escape') { if (typing) e.target.blur(); else clearSelection(); return; }
+    if (e.key === 'Escape') {
+      if (typing) e.target.blur();
+      else if (walking()) stopWalk();
+      else clearSelection();
+      return;
+    }
     if (typing) return;
+    // Stepping keys, so the walk can be driven from a presenter remote.
+    if (walking()) {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ' || e.key === 'PageDown') {
+        e.preventDefault(); stepWalk(1); return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
+        e.preventDefault(); stepWalk(-1); return;
+      }
+    }
     if (e.key === '/') { e.preventDefault(); search.focus(); }
     if (e.key === 'f') fit();
+    if (e.key === 'w') walking() ? stopWalk() : startWalk();
   });
 
   // ---- boot -------------------------------------------------------------
@@ -696,11 +866,13 @@ ${PAGE_CSS}</style>
     <span class="zoom-label" id="zoom-label">100%</span>
     <button id="zoom-in" aria-label="Zoom in">+</button>
     <button id="fit">Fit</button>
+    <button id="walk">Walk it through</button>
   </div>
 </header>
 
 <main>
   <div id="stage">${svgMarkup}</div>
+  <div id="walkbar" hidden></div>
 </main>
 
 <div id="modal" hidden>
@@ -710,7 +882,7 @@ ${PAGE_CSS}</style>
 <div id="tooltip" hidden></div>
 
 <footer class="bar">
-  <span>Hover an artifact for a summary · click it to open the full record · drag to pan, ctrl+scroll to zoom · Esc closes</span>
+  <span>Walk it through to be shown the incident a beat at a time · hover for a summary, click for the full record · drag to pan, ctrl+scroll to zoom</span>
   <span>Built with GIBSEN Studio — an independent implementation of the incident threat matrix taught by Pete Hay in &ldquo;The Importance of Arts and Crafts in ThreatOps&rdquo;.</span>
 </footer>
 

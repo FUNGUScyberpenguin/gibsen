@@ -151,6 +151,20 @@ describe('buildInteractiveHtml', () => {
     expect(html).toContain("document.execCommand('copy')");
   });
 
+  it('carries the walkthrough, so the page can show the incident rather than hand it over', () => {
+    const html = build();
+    const payload = JSON.parse(html.split('<script type="application/json" id="gibsen-data">')[1].split('</script>')[0]);
+
+    expect(payload.story).toHaveLength(2);
+    expect(payload.story[0].sentence).toContain('The story starts with');
+    expect(payload.story[1].sentence).toBe('kettle-invoices.top resolves to 203.0.113.44.');
+
+    expect(html).toContain('<button id="walk">Walk it through</button>');
+    expect(html).toContain('<div id="walkbar" hidden></div>');
+    // The bar sits over the diagram, so a press on it must not start a pan.
+    expect(html).toContain('walkbar.contains(e.target)');
+  });
+
   it('handles an incident with nothing in it', () => {
     const html = buildInteractiveHtml({ incident: emptyIncident('Empty'), svgMarkup: SVG, theme: DARK });
     expect(html).toContain('No timestamps recorded');

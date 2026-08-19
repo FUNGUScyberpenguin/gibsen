@@ -788,6 +788,132 @@ textarea {
   text-align: right;
 }
 
+/* -------------------------------------------------------------- walkthrough */
+
+/* Stepping through the incident holds the rest of the diagram back so the eye
+   knows where to look. Screen only — nothing here reaches an exported file. */
+
+.stage svg.walking [data-node-id],
+.stage svg.walking [data-edge-id] {
+  opacity: 0.1;
+  transition: opacity 0.18s ease;
+}
+
+.stage svg.walking [data-node-id].lit,
+.stage svg.walking [data-edge-id].lit {
+  opacity: 1;
+}
+
+.canvas.walking .canvas-hud {
+  bottom: auto;
+  top: 12px;
+}
+
+/* Presenting is a different job from building. The panels that exist to edit
+   the diagram get out of the way of showing it. */
+.app.walking .workspace {
+  grid-template-columns: 1fr;
+}
+
+.app.walking .sidebar,
+.app.walking .inspector {
+  display: none;
+}
+
+.walk-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  padding: 14px 20px 16px;
+  /* Opaque, not a fade: the diagram scrolls under here and a translucent bar
+     leaves the legend showing through the sentence. */
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -18px 34px rgb(3 8 18 / 45%);
+}
+
+.walk-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.walk-count {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+
+.walk-when {
+  font-family: var(--mono);
+}
+
+.walk-since {
+  color: var(--warn);
+}
+
+.walk-spacer {
+  flex: 1;
+}
+
+/* The sentence is the point of the whole feature: big enough to read from the
+   back of a room, because that is where it gets read from. */
+.walk-sentence {
+  margin: 8px 0 0;
+  font-size: 17px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.walk-note {
+  margin: 6px 0 0;
+  max-width: 90ch;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.walk-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.walk-track {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.walk-tick {
+  flex: 1;
+  min-width: 2px;
+  height: 6px;
+  padding: 0;
+  background: var(--border);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.walk-tick:hover {
+  background: var(--text-faint);
+}
+
+.walk-tick-done {
+  background: var(--accent-strong);
+}
+
+.walk-tick-now {
+  background: var(--accent);
+  height: 10px;
+}
+
 /* ------------------------------------------------------------ record modal */
 
 /* The diagram carries the shape of the incident; this carries the evidence.

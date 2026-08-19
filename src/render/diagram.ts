@@ -266,7 +266,12 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
     const color = RELATION_FAMILY_COLOR[def?.family ?? 'generic'];
     const opacity = CONFIDENCE_OPACITY[routed.edge.confidence] ?? 0.8;
 
-    edgeGroup.append(
+    // One group per behaviour, so the verb dims and selects with the line it
+    // belongs to rather than behaving like a separate object.
+    const group = el('g', { 'data-edge-id': options.interactive ? routed.edge.id : undefined });
+    edgeGroup.append(group);
+
+    group.append(
       el('path', {
         d: routed.path,
         fill: 'none',
@@ -275,7 +280,6 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
         'stroke-opacity': opacity,
         'stroke-dasharray': routed.edge.confidence === 'suspected' || routed.retrograde ? '5 4' : undefined,
         'marker-end': `url(#gib-arrow-${sanitiseId(color)})`,
-        'data-edge-id': options.interactive ? routed.edge.id : undefined,
       }),
     );
 
@@ -286,7 +290,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
     // artifacts it connects. The relation is still in the inspector and the
     // report, so dropping the label here costs nothing but noise.
     if (showEdgeLabels && routed.span >= width + 12) {
-      edgeGroup.append(
+      group.append(
         el('rect', {
           x: routed.labelX - width / 2,
           y: routed.labelY - 8,
