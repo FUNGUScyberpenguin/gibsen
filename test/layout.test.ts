@@ -50,6 +50,13 @@ describe('chooseGranularity', () => {
     expect(new Set(stamps.map((s) => bucketStart(s, granularity))).size).toBeLessThanOrEqual(16);
   });
 
+  it('does not coarsen away distinct events just to stay narrow', () => {
+    // 40 separate minutes stay 40 separate columns by default: merging them
+    // would destroy the sequence the X axis exists to show.
+    const stamps = Array.from({ length: 40 }, (_, i) => new Date(Date.UTC(2024, 2, 14, 8, i)).toISOString());
+    expect(chooseGranularity(stamps)).toBe('second');
+  });
+
   it('falls back to a sane default with no timestamps', () => {
     expect(chooseGranularity([], 16)).toBe('minute');
   });
@@ -244,6 +251,36 @@ describe('layout', () => {
   it('ignores an end time that precedes the start', () => {
     const node = makeNode({ label: 'bad', category: 'file', t: '2024-03-14T09:00:00Z', tEnd: '2024-03-14T08:00:00Z' });
     expect(node.tEnd).toBeNull();
+  });
+
+  it('sizes the box to the longest label in the incident', () => {
+    const short = emptyIncident();
+    short.nodes.push(makeNode({ label: 'a.example.com', category: 'domain', t: '2024-03-14T08:00:00Z' }));
+    const shortResult = layout(short);
+    expect(shortResult.labelLines).toBe(1);
+
+    const long = emptyIncident();
+    long.nodes.push(
+      makeNode({
+        label: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\KettleUpdate',
+        category: 'registry-key',
+        t: '2024-03-14T08:00:00Z',
+      }),
+    );
+    const longResult = layout(long);
+    expect(longResult.labelLines).toBeGreaterThan(1);
+    // Every box grows together, so the lane packing and column grid stay square.
+    expect(longResult.nodeHeight).toBeGreaterThan(shortResult.nodeHeight);
+    expect(longResult.nodes.every((n) => n.h === longResult.nodeHeight)).toBe(true);
+  });
+
+  it('keeps a long identifier intact rather than eliding its middle', () => {
+    const incident = emptyIncident();
+    const label = 'HKLM\\System\\CurrentControlSet\\Services\\TicklerSvc';
+    incident.nodes.push(makeNode({ label, category: 'registry-key', t: '2024-03-14T08:00:00Z' }));
+    const result = layout(incident);
+    // Three lines at this width is more than enough for a path of this length.
+    expect(result.labelLines * Math.floor((result.nodeWidth - 24) / (12 * 0.601))).toBeGreaterThanOrEqual(label.length);
   });
 
   it('measures each edge span so the renderer can drop labels that will not fit', () => {

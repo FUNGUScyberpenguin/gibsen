@@ -12,8 +12,15 @@
 import type { GibsenEdge, GibsenNode, Incident, PlaneId, PlaneSetId } from '../model/types';
 import { planesFor, resolvePlane } from '../model/taxonomy';
 
-export const NODE_W = 176;
+/** Baseline node box. The real width and height come out of `layout`, which
+ * sizes them to the labels the incident actually contains. */
+export const NODE_W = 240;
 export const NODE_H = 60;
+/** Extra height per wrapped line of label beyond the first. */
+const LABEL_LINE_H = 15;
+/** Characters that fit on one line of the label at 12px monospace. */
+const LABEL_CHARS_PER_LINE = Math.floor((NODE_W - 24) / (12 * 0.601));
+const LABEL_MAX_LINES = 3;
 const COL_GAP = 34;
 const ROW_GAP = 16;
 const BAND_PAD = 20;
@@ -84,8 +91,15 @@ export function bucketStart(iso: string, granularity: Granularity): string {
   return new Date(Math.floor(d.getTime() / unit) * unit).toISOString();
 }
 
-/** Coarsest-but-still-informative granularity that fits within `maxColumns`. */
-export function chooseGranularity(stamps: string[], maxColumns = 16): Granularity {
+/**
+ * Coarsest-but-still-informative granularity that fits within `maxColumns`.
+ *
+ * The budget is deliberately loose. Coarsening merges distinct events into one
+ * column, and the X axis exists precisely to keep them apart — so a wide
+ * diagram is the right trade against a diagram that has quietly stopped
+ * distinguishing 09:14 from 09:18.
+ */
+export function chooseGranularity(stamps: string[], maxColumns = 200): Granularity {
   if (stamps.length === 0) return 'minute';
   for (const g of LADDER) {
     const buckets = new Set(stamps.map((s) => bucketStart(s, g)));
@@ -158,6 +172,11 @@ export interface LayoutResult {
   edges: RoutedEdge[];
   granularity: Granularity;
   planeSet: PlaneSetId;
+  /** Box size chosen for this incident's labels; the renderer uses these. */
+  nodeWidth: number;
+  nodeHeight: number;
+  /** How many lines the longest label needs, 1 to 3. */
+  labelLines: number;
   /** Nodes hidden because their plane band was collapsed away. */
   unplaced: GibsenNode[];
 }
@@ -166,7 +185,11 @@ export interface LayoutOptions {
   granularity?: Granularity | 'auto';
   /** Which family of artifact planes to draw against. */
   planeSet?: PlaneSetId;
-  /** Draw planes that contain no artifacts. Off by default to save height. */
+  /**
+   * Draw planes that contain no artifacts. Off by default because an empty band
+   * is noise rather than because of the height — turn it on to show explicitly
+   * that, say, nothing reached OT.
+   */
   showEmptyPlanes?: boolean;
   maxColumns?: number;
 }
@@ -230,8 +253,18 @@ interface Placement {
   endCol: number;
 }
 
+/** Lines a label needs at the fixed node width, capped. */
+export function labelLineCount(label: string): number {
+  return Math.min(LABEL_MAX_LINES, Math.max(1, Math.ceil(label.length / LABEL_CHARS_PER_LINE)));
+}
+
 export function layout(incident: Incident, options: LayoutOptions = {}): LayoutResult {
   const planeSet = options.planeSet ?? incident.planeSet ?? 'talk';
+
+  // One box size for the whole diagram, tall enough for its longest label.
+  // Uniform beats snug: it keeps the lane packing and the column grid honest.
+  const labelLines = incident.nodes.reduce((most, n) => Math.max(most, labelLineCount(n.label)), 1);
+  const nodeHeight = NODE_H + (labelLines - 1) * LABEL_LINE_H;
 
   // An artifact that spans time puts a stamp at each end, and both deserve a
   // column — the delete at the far end is as much an event as the write.
@@ -243,7 +276,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
 
   const granularity =
     !options.granularity || options.granularity === 'auto'
-      ? chooseGranularity(stamps, options.maxColumns ?? 16)
+      ? chooseGranularity(stamps, options.maxColumns ?? 200)
       : options.granularity;
 
   // --- columns ----------------------------------------------------------
@@ -353,7 +386,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   for (const plane of visiblePlanes) {
     const lanes = laneCount.get(plane.id) ?? 1;
     const pad = plane.boundary ? SEAM_PAD : BAND_PAD;
-    const height = pad * 2 + lanes * NODE_H + (lanes - 1) * ROW_GAP;
+    const height = pad * 2 + lanes * nodeHeight + (lanes - 1) * ROW_GAP;
     bands.push({
       plane: plane.id,
       label: plane.label,
@@ -382,7 +415,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
     const lane = laneOf.get(p.node) ?? 0;
     const pad = band.boundary ? SEAM_PAD : BAND_PAD;
     const x = columns[p.startCol].x;
-    const nodeY = band.y + pad + lane * (NODE_H + ROW_GAP);
+    const nodeY = band.y + pad + lane * (nodeHeight + ROW_GAP);
     const w = NODE_W + (p.endCol - p.startCol) * COL_W;
 
     positioned.push({
@@ -391,9 +424,9 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
       x,
       y: nodeY,
       w,
-      h: NODE_H,
+      h: nodeHeight,
       cx: x + w / 2,
-      cy: nodeY + NODE_H / 2,
+      cy: nodeY + nodeHeight / 2,
       spanning: p.endCol > p.startCol,
     });
   }
@@ -412,7 +445,20 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   const width = GUTTER_W + CANVAS_PAD * 2 + columns.length * COL_W;
   const height = y + CANVAS_PAD;
 
-  return { width, height, columns, bands, nodes: positioned, edges: routed, granularity, planeSet, unplaced };
+  return {
+    width,
+    height,
+    columns,
+    bands,
+    nodes: positioned,
+    edges: routed,
+    granularity,
+    planeSet,
+    nodeWidth: NODE_W,
+    nodeHeight,
+    labelLines,
+    unplaced,
+  };
 }
 
 /**

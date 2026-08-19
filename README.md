@@ -139,6 +139,14 @@ Every node carries the material that turns a picture into a report:
 Detail lives on the node rather than on the canvas on purpose: zoom out for the
 executive summary, zoom in for the function-level notes.
 
+**The diagram is never compressed to save room.** Every distinct timestamp gets
+its own column, so four steps of a delivery chain seconds apart stay four
+columns rather than collapsing into one minute. Labels wrap across up to three
+lines instead of being elided, so a registry path or a full hash stays readable.
+A wide diagram costs nothing; a diagram that has quietly stopped distinguishing
+09:14:10 from 09:14:20, or that renders a path as `…s\CurrentVersion\Ru…`,
+costs the reader the thing they came for.
+
 ### Artifacts that span time
 
 Set an artifact's **Until** and it is drawn long, running across every column it

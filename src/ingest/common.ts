@@ -291,8 +291,14 @@ export function sentences(paragraph: string): string[] {
     .filter(Boolean);
 }
 
-/** Shorten a value for use as a node label without losing its identity. */
-export function truncateLabel(value: string, max = 34): string {
+/**
+ * Shorten a value for use as a node label without losing its identity.
+ *
+ * The cap is generous because the diagram would rather be wide than lie: a
+ * registry path or a full hash is the artifact's identity, and an ellipsis in
+ * the middle of one costs the reader more than the width does.
+ */
+export function truncateLabel(value: string, max = 90): string {
   if (value.length <= max) return value;
   // Keep the tail of paths and URLs — the distinguishing part is usually last.
   if (/[/\\]/.test(value)) {

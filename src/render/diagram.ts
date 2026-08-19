@@ -9,7 +9,7 @@
 
 import type { Incident } from '../model/types';
 import type { LayoutResult, PositionedNode } from '../layout/layout';
-import { COL_W, GUTTER_W, HEADER_H, NODE_W } from '../layout/layout';
+import { COL_W, GUTTER_W, HEADER_H } from '../layout/layout';
 import { CATEGORY_BY_ID, CONFIDENCE_OPACITY, PLANE_BY_ID, RELATION_BY_ID, RELATION_FAMILY_COLOR, TACTICS } from '../model/taxonomy';
 import { iconFor } from '../model/icons';
 import type { Theme } from './theme';
@@ -64,6 +64,36 @@ function fitText(text: string, maxWidth: number, fontSize: number, mono: boolean
   if (text.length <= max) return text;
   if (max <= 1) return '…';
   return `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * Break a label across lines, preferring the separators that already segment
+ * it — a registry path or a file path reads far better broken at a backslash
+ * than mid-token. Falls back to hard chunks for things like hashes.
+ */
+function wrapLabel(text: string, maxChars: number, maxLines: number): string[] {
+  if (text.length <= maxChars) return [text];
+
+  const lines: string[] = [];
+  let rest = text;
+
+  while (rest.length > maxChars && lines.length < maxLines - 1) {
+    const window = rest.slice(0, maxChars + 1);
+    // Break after the last separator that still leaves a reasonable line.
+    const at = Math.max(
+      window.lastIndexOf('\\'),
+      window.lastIndexOf('/'),
+      window.lastIndexOf('.'),
+      window.lastIndexOf('-'),
+      window.lastIndexOf('_'),
+    );
+    const cut = at > maxChars * 0.4 ? at + 1 : maxChars;
+    lines.push(rest.slice(0, cut));
+    rest = rest.slice(cut);
+  }
+
+  lines.push(rest.length > maxChars ? `${rest.slice(0, maxChars - 1)}…` : rest);
+  return lines;
 }
 
 function sanitiseId(color: string): string {
@@ -319,6 +349,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
     const selected = options.selectedId === node.id;
     const borderOpacity = CONFIDENCE_OPACITY[node.confidence] ?? 1;
     const severed = options.chokePoints?.get(node.id) ?? 0;
+    const boxWidth = result.nodeWidth;
 
     const group = el('g', {
       transform: `translate(${placed.x}, ${placed.y})`,
@@ -386,7 +417,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       // its far end sits nowhere near the artifact it connects to.
       const anchorX = 14;
       const anchor = 'start';
-      const labelWidth = Math.min(w, NODE_W * 1.4) - 28;
+      const labelWidth = Math.min(w, result.nodeWidth * 1.4) - 28;
       const count = node.aggregate.count;
       group.append(
         el(
@@ -428,7 +459,7 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
     if (placed.spanning) {
       group.append(
         el('line', {
-          x1: NODE_W - 14, y1: placed.h - 13, x2: placed.w - 10, y2: placed.h - 13,
+          x1: boxWidth - 14, y1: placed.h - 13, x2: placed.w - 10, y2: placed.h - 13,
           stroke: accent, 'stroke-width': 1, 'stroke-dasharray': '2 3', 'stroke-opacity': 0.65,
         }),
         el('line', {
@@ -462,17 +493,25 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       el(
         'text',
         { x: 38, y: 22, fill: theme.textMuted, 'font-size': 9.5, 'letter-spacing': 0.3 },
-        fitText((CATEGORY_BY_ID[node.category]?.label ?? node.category).toUpperCase(), NODE_W - 60, 9.5, false),
-      ),
-      el(
-        'text',
-        { x: 12, y: 45, fill: theme.text, 'font-size': 12, 'font-family': MONO },
-        fitText(node.label, Math.max(placed.w, NODE_W) - 24, 12, true),
+        fitText((CATEGORY_BY_ID[node.category]?.label ?? node.category).toUpperCase(), boxWidth - 60, 9.5, false),
       ),
     );
 
+    // The label gets as many lines as this incident's longest one needed, so a
+    // registry path or a hash is readable rather than elided into ambiguity.
+    const labelChars = Math.floor((Math.max(placed.w, boxWidth) - 24) / (12 * 0.601));
+    wrapLabel(node.label, labelChars, result.labelLines).forEach((line, i) => {
+      group.append(
+        el(
+          'text',
+          { x: 12, y: 45 + i * 15, fill: theme.text, 'font-size': 12, 'font-family': MONO },
+          line,
+        ),
+      );
+    });
+
     // Badges along the top-right of the first column's worth of box.
-    let badgeX = Math.min(placed.w, NODE_W) - 12;
+    let badgeX = Math.min(placed.w, boxWidth) - 12;
     if (node.pivot) {
       group.append(el('circle', { cx: badgeX, cy: 14, r: 4.2, fill: theme.pivot }));
       badgeX -= 13;
