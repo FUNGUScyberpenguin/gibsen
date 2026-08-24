@@ -147,6 +147,8 @@ export interface TimeColumn {
   delta: string | null;
   /** Blank space drawn before this column, standing for the interval. */
   gapBefore: number;
+  /** Outside working hours in the zone the axis is showing. */
+  outOfHours: boolean;
   /**
    * Set when the gap was too large to draw even at log scale, and the axis is
    * showing a break. Carries the words to print across it.
@@ -223,6 +225,8 @@ export interface LayoutResult {
   edges: RoutedEdge[];
   granularity: Granularity;
   planeSet: PlaneSetId;
+  /** The zone the axis was labelled in. */
+  timeZone: string;
   /** Named stretches of the incident, empty when the tactics do not support any. */
   acts: Act[];
   /** Top margin actually used, which grows to make room for the acts band. */
@@ -254,13 +258,78 @@ export interface LayoutOptions {
   timeToScale?: boolean;
   /** Draw the band of named acts above the axis. */
   showActs?: boolean;
+  /**
+   * IANA zone the axis is labelled in. Storage and sorting stay UTC; this only
+   * changes what the reader is shown, and what counts as out of hours.
+   */
+  timeZone?: string;
 }
 
-function formatColumnLabel(iso: string, granularity: Granularity): { label: string; sublabel: string } {
+/**
+ * An instant, read in whichever zone the axis is being shown in.
+ *
+ * Everything is stored and compared as UTC — that is the only way the sort is
+ * trustworthy — but "03:14 on a Sunday" is a fact about the victim's clock,
+ * not about Greenwich, and it is one of the things a diagram should be able to
+ * say out loud.
+ */
+interface ZonedParts {
+  year: string;
+  month: string;
+  day: string;
+  weekday: string;
+  hour: number;
+  minute: string;
+  second: string;
+}
+
+const ZONE_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+
+function zonedParts(iso: string, timeZone: string): ZonedParts {
+  let formatter = ZONE_FORMATTERS.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      hour12: false,
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    ZONE_FORMATTERS.set(timeZone, formatter);
+  }
+
+  const found: Record<string, string> = {};
+  for (const part of formatter.formatToParts(new Date(iso))) found[part.type] = part.value;
+
+  return {
+    year: found.year ?? '',
+    month: found.month ?? '',
+    day: found.day ?? '',
+    weekday: found.weekday ?? '',
+    // Midnight comes back as 24 in some locales.
+    hour: Number(found.hour ?? '0') % 24,
+    minute: found.minute ?? '00',
+    second: found.second ?? '00',
+  };
+}
+
+/** Outside 08:00–18:00 on a weekday, in the zone the axis is showing. */
+function isOutOfHours(iso: string, timeZone: string): boolean {
+  const p = zonedParts(iso, timeZone);
+  if (p.weekday === 'Sat' || p.weekday === 'Sun') return true;
+  return p.hour < 8 || p.hour >= 18;
+}
+
+function formatColumnLabel(iso: string, granularity: Granularity, timeZone: string): { label: string; sublabel: string } {
+  const p = zonedParts(iso, timeZone);
+  const time = `${String(p.hour).padStart(2, '0')}:${p.minute}`;
+  const withSeconds = `${time}:${p.second}`;
+  const day = `${p.day} ${p.month} ${p.year}`;
   const d = new Date(iso);
-  const time = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
-  const withSeconds = `${time}:${String(d.getUTCSeconds()).padStart(2, '0')}`;
-  const day = `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })} ${d.getUTCFullYear()}`;
 
   switch (granularity) {
     case 'second':
@@ -275,10 +344,10 @@ function formatColumnLabel(iso: string, granularity: Granularity): { label: stri
     case 'week':
       return { label: day, sublabel: '' };
     case 'month':
-      return { label: d.toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }), sublabel: String(d.getUTCFullYear()) };
+      return { label: d.toLocaleString('en-GB', { month: 'long', timeZone }), sublabel: p.year };
     case 'year':
     default:
-      return { label: String(d.getUTCFullYear()), sublabel: '' };
+      return { label: p.year, sublabel: '' };
   }
 }
 
@@ -415,6 +484,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   const hasUnsequenced = incident.nodes.some((n) => !n.t);
 
   const toScale = options.timeToScale ?? true;
+  const timeZone = options.timeZone ?? 'UTC';
 
   /**
    * The shortest real interval in the incident, used as the unit the others
@@ -469,13 +539,14 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
       delta: null,
       gapBefore: 0,
       elided: null,
+      outOfHours: false,
     });
     cursor += COL_W;
   }
 
   let previousDay = '';
   bucketKeys.forEach((key, position) => {
-    const { label, sublabel } = formatColumnLabel(key, granularity);
+    const { label, sublabel } = formatColumnLabel(key, granularity, timeZone);
     const showSub = sublabel && sublabel !== previousDay;
     if (sublabel) previousDay = sublabel;
     const prevKey = bucketKeys[position - 1];
@@ -491,6 +562,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
       delta: prevKey ? formatDelta(prevKey, key) : null,
       gapBefore: gap,
       elided,
+      outOfHours: isOutOfHours(key, timeZone),
     });
     cursor += COL_W;
     index += 1;
@@ -507,6 +579,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
       delta: null,
       gapBefore: 0,
       elided: null,
+      outOfHours: false,
     });
   }
 
@@ -668,6 +741,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
     edges: routed,
     granularity,
     planeSet,
+    timeZone,
     acts,
     headerHeight,
     nodeWidth: NODE_W,

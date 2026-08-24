@@ -539,3 +539,56 @@ describe('acts', () => {
     expect(layout(incident, { granularity: 'minute' }).acts.map((a) => a.label)).toContain('Impact');
   });
 });
+
+describe('the axis in a reader’s own zone', () => {
+  /** 09:00 UTC on a Monday in March, which is 04:00 in New York. */
+  const morning = () => atMinutes([0, 1, 2]);
+
+  it('labels the axis in UTC by default, and says so', () => {
+    const result = layout(morning(), { granularity: 'minute' });
+    expect(result.timeZone).toBe('UTC');
+    expect(result.columns[0].label).toBe('09:00');
+  });
+
+  it('relabels the columns without touching what is stored', () => {
+    const incident = morning();
+    const stored = incident.nodes.map((n) => n.t);
+    const result = layout(incident, { granularity: 'minute', timeZone: 'America/New_York' });
+
+    expect(result.columns[0].label).toBe('04:00');
+    expect(result.timeZone).toBe('America/New_York');
+    // Sorting and storage stay UTC: that is the only way the order is trustworthy.
+    expect(incident.nodes.map((n) => n.t)).toEqual(stored);
+    expect(result.columns[0].key).toBe('2026-03-02T09:00:00.000Z');
+  });
+
+  it('marks the hours nobody should have been working in', () => {
+    // 09:00 UTC is inside working hours; 04:00 in New York is not.
+    expect(layout(morning(), { granularity: 'minute' }).columns.every((c) => !c.outOfHours)).toBe(true);
+    expect(
+      layout(morning(), { granularity: 'minute', timeZone: 'America/New_York' }).columns.every((c) => c.outOfHours),
+    ).toBe(true);
+  });
+
+  it('counts a weekend as out of hours whatever the clock says', () => {
+    const incident = emptyIncident('Weekend');
+    // 7 March 2026 is a Saturday; 14:00 would be working hours on a weekday.
+    incident.nodes.push(
+      makeNode({ label: 'a', category: 'file', t: '2026-03-06T14:00:00Z' }),
+      makeNode({ label: 'b', category: 'file', t: '2026-03-07T14:00:00Z' }),
+    );
+    const { columns } = layout(incident, { granularity: 'hour' });
+    expect(columns.map((c) => c.outOfHours)).toEqual([false, true]);
+  });
+
+  it('never marks the unsequenced column, which has no clock at all', () => {
+    const incident = emptyIncident('Loose');
+    incident.nodes.push(
+      makeNode({ label: 'a', category: 'file' }),
+      makeNode({ label: 'b', category: 'file', t: '2026-03-02T03:00:00Z' }),
+    );
+    const { columns } = layout(incident, { granularity: 'hour' });
+    expect(columns[0].key).toBe(null);
+    expect(columns[0].outOfHours).toBe(false);
+  });
+});

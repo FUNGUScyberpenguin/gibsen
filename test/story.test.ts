@@ -120,3 +120,47 @@ describe('buildStory', () => {
     expect(buildStory(emptyIncident('Empty'))).toEqual([]);
   });
 });
+
+describe('acts along the walk', () => {
+  it('names each beat with the phase it belongs to', () => {
+    const incident = emptyIncident('Phased');
+    incident.nodes.push(
+      makeNode({ label: 'lure', category: 'email', t: '2026-03-02T09:00:00Z', tactic: 'initial-access' }),
+      makeNode({ label: 'mshta.exe', category: 'executable', t: '2026-03-02T09:01:00Z', tactic: 'execution' }),
+      makeNode({ label: 'loader.dll', category: 'executable', t: '2026-03-02T09:02:00Z', tactic: 'execution' }),
+      makeNode({ label: 'ransomware', category: 'ransomware', t: '2026-03-02T09:03:00Z', tactic: 'impact' }),
+    );
+    expect(buildStory(incident).map((b) => b.act)).toEqual(['Initial Access', 'Execution', 'Execution', 'Impact']);
+  });
+
+  it('absorbs a lone interloper rather than breaking the phase in two', () => {
+    const incident = emptyIncident('Beacon');
+    incident.nodes.push(
+      makeNode({ label: 'a', category: 'executable', t: '2026-03-02T09:00:00Z', tactic: 'execution' }),
+      makeNode({ label: 'b', category: 'c2-server', t: '2026-03-02T09:01:00Z', tactic: 'command-and-control' }),
+      makeNode({ label: 'c', category: 'executable', t: '2026-03-02T09:02:00Z', tactic: 'execution' }),
+      makeNode({ label: 'd', category: 'ransomware', t: '2026-03-02T09:03:00Z', tactic: 'impact' }),
+    );
+    expect(buildStory(incident).map((b) => b.act)).toEqual(['Execution', 'Execution', 'Execution', 'Impact']);
+  });
+
+  it('carries an act over untagged beats, forwards and back to the start', () => {
+    const incident = emptyIncident('Sparse');
+    incident.nodes.push(
+      makeNode({ label: 'a', category: 'file', t: '2026-03-02T09:00:00Z' }),
+      makeNode({ label: 'b', category: 'executable', t: '2026-03-02T09:01:00Z', tactic: 'execution' }),
+      makeNode({ label: 'c', category: 'file', t: '2026-03-02T09:02:00Z' }),
+      makeNode({ label: 'd', category: 'ransomware', t: '2026-03-02T09:03:00Z', tactic: 'impact' }),
+    );
+    expect(buildStory(incident).map((b) => b.act)).toEqual(['Execution', 'Execution', 'Execution', 'Impact']);
+  });
+
+  it('says nothing when one act would cover the whole walk', () => {
+    const incident = emptyIncident('Flat');
+    incident.nodes.push(
+      makeNode({ label: 'a', category: 'executable', t: '2026-03-02T09:00:00Z', tactic: 'execution' }),
+      makeNode({ label: 'b', category: 'executable', t: '2026-03-02T09:01:00Z', tactic: 'execution' }),
+    );
+    expect(buildStory(incident).every((b) => b.act === null)).toBe(true);
+  });
+});

@@ -209,6 +209,25 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
   const axis = el('g');
   const headerH = result.headerHeight;
   const diagramBottom = result.height;
+
+  // Out-of-hours first, underneath everything else on the axis: a wash behind
+  // the columns nobody should have been working in. Attackers keeping office
+  // hours is a finding; so is a 03:00 Sunday, and neither is legible from a
+  // timestamp column you have to read one entry at a time.
+  for (const column of result.columns) {
+    if (!column.outOfHours) continue;
+    axis.append(
+      el('rect', {
+        x: column.x - 17 - column.gapBefore,
+        y: headerH,
+        width: COL_W + column.gapBefore,
+        height: Math.max(0, diagramBottom - 12 - headerH),
+        fill: theme.textMuted,
+        'fill-opacity': 0.055,
+      }),
+    );
+  }
+
   for (const column of result.columns) {
     const x = column.x;
     axis.append(
@@ -317,7 +336,12 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
       'stroke-width': 1.2,
       'marker-end': `url(#gib-arrow-${sanitiseId(theme.textMuted)})`,
     }),
-    el('text', { x: 22, y: headerH - 26, fill: theme.textMuted, 'font-size': 10, 'letter-spacing': 1.2 }, 'TIME →'),
+    el(
+      'text',
+      { x: 22, y: headerH - 26, fill: theme.textMuted, 'font-size': 10, 'letter-spacing': 1.2 },
+      // Naming the zone on the axis, so nobody reads a local clock as UTC.
+      result.timeZone === 'UTC' ? 'TIME → UTC' : `TIME → ${result.timeZone}`,
+    ),
   );
   root.append(axis);
 
@@ -712,6 +736,15 @@ function renderLegend(
     );
   }
 
+  if (result.columns.some((c) => c.outOfHours)) {
+    marker(
+      () =>
+        group.append(
+          el('rect', { x, y: row(3) - 9, width: 14, height: 13, rx: 2, fill: theme.textMuted, 'fill-opacity': 0.14 }),
+        ),
+      'outside working hours',
+    );
+  }
   if (result.columns.some((c) => c.elided)) {
     marker(
       () =>

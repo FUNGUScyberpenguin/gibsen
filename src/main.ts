@@ -14,14 +14,15 @@ import { emptyIncident, makeEdge, mergeIngest, removeNode } from './model/incide
 import { ingest } from './ingest';
 import { extractPdfText, isPdf } from './ingest/pdf';
 import type { Granularity } from './layout/layout';
-import { layout } from './layout/layout';
+import { GUTTER_W, layout } from './layout/layout';
 import { renderDiagram } from './render/diagram';
 import { findChokePoints, type ChokePoint } from './analysis/congruence';
 import { themeByName } from './render/theme';
-import { exportInteractive, exportJson, exportMarkdown, exportPng, exportSvg } from './export/download';
+import { exportInteractive, exportJson, exportMarkdown, exportPng, exportSlices, exportSvg } from './export/download';
 import { renderInspector, type Selection } from './ui/inspector';
 import { closeRecord, openRecord, recordIsOpen } from './ui/modal';
 import { Walkthrough } from './ui/walkthrough';
+import { Autosave } from './ui/autosave';
 import { h } from './ui/dom';
 import { SAMPLES } from './samples';
 
@@ -41,6 +42,11 @@ interface ViewOptions {
   timeToScale: boolean;
   /** Name the stretches of the incident above the axis. */
   showActs: boolean;
+  /**
+   * Label the axis in the reader's own zone and wash the hours nobody should
+   * have been working in. Storage stays UTC either way.
+   */
+  localTime: boolean;
 }
 
 const state = {
@@ -55,6 +61,7 @@ const state = {
     showCongruence: true,
     timeToScale: true,
     showActs: true,
+    localTime: false,
   } as ViewOptions,
   zoom: { scale: 1, tx: 24, ty: 24 },
   linkSource: null as string | null,
@@ -91,6 +98,7 @@ const els = {
   toggleCongruence: byId<HTMLInputElement>('toggle-congruence'),
   toggleScale: byId<HTMLInputElement>('toggle-scale'),
   toggleActs: byId<HTMLInputElement>('toggle-acts'),
+  toggleLocalTime: byId<HTMLInputElement>('toggle-local-time'),
   toggleLegend: byId<HTMLInputElement>('toggle-legend'),
   toggleEdgeLabels: byId<HTMLInputElement>('toggle-edge-labels'),
   toggleEmptyPlanes: byId<HTMLInputElement>('toggle-empty-planes'),
@@ -126,12 +134,37 @@ function chokePointMap(): Map<string, number> {
   return new Map(topChokePoints().map((c) => [c.nodeId, c.severed]));
 }
 
+/** The zone the axis is labelled in. Storage and sorting stay UTC regardless. */
+function activeTimeZone(): string {
+  if (!state.view.localTime) return 'UTC';
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+/**
+ * Keeps the open incident in this browser between visits. Hooked to the redraw
+ * rather than to each mutation, so no edit path can quietly miss it.
+ */
+const autosave = new Autosave((outcome) => {
+  if (outcome === 'too-large') {
+    state.warnings = [
+      'This incident is too large to keep in browser storage, so it is no longer being saved automatically. Export the incident JSON to keep it.',
+      ...state.warnings,
+    ].slice(0, 12);
+    drawWarnings();
+  }
+});
+
 function drawDiagram(): void {
   const result = layout(state.incident, {
     granularity: state.view.granularity,
     showEmptyPlanes: state.view.showEmptyPlanes,
     timeToScale: state.view.timeToScale,
     showActs: state.view.showActs,
+    timeZone: activeTimeZone(),
   });
 
   const svg = renderDiagram(state.incident, result, {
@@ -142,6 +175,8 @@ function drawDiagram(): void {
     chokePoints: chokePointMap(),
     interactive: true,
   });
+
+  autosave.schedule(state.incident);
 
   state.svg = svg;
   els.stage.replaceChildren(svg);
@@ -601,6 +636,7 @@ function setupSidebar(): void {
     state.incident = emptyIncident('Untitled incident');
     state.selection = { kind: 'none' };
     state.warnings = [];
+    autosave.clear();
     cancelLink();
     redrawAll();
     setStatus('New incident started.');
@@ -647,6 +683,12 @@ function setupToolbar(): void {
   els.toggleActs.addEventListener('change', () => {
     state.view.showActs = els.toggleActs.checked;
     drawDiagram();
+  });
+
+  els.toggleLocalTime.addEventListener('change', () => {
+    state.view.localTime = els.toggleLocalTime.checked;
+    drawDiagram();
+    setStatus(state.view.localTime ? `Axis in ${activeTimeZone()}. Stored times are still UTC.` : 'Axis in UTC.');
   });
 
   els.toggleLegend.addEventListener('change', () => {
@@ -720,6 +762,7 @@ async function runExport(kind: string): Promise<void> {
     showEmptyPlanes: state.view.showEmptyPlanes,
     timeToScale: state.view.timeToScale,
     showActs: state.view.showActs,
+    timeZone: activeTimeZone(),
   });
   const clean = renderDiagram(state.incident, result, {
     theme: themeByName(state.view.theme),
@@ -747,6 +790,48 @@ async function runExport(kind: string): Promise<void> {
         await exportPng(clean, state.incident, 2);
         setStatus('PNG exported.');
         break;
+      case 'slides': {
+        // One image per act. A whole incident is one enormous wide picture
+        // that nobody can put on a slide; an act is a picture of one phase.
+        const slices = result.acts.map((act) => ({
+          name: act.label,
+          subtitle: [act.from?.replace('.000Z', 'Z'), act.duration].filter(Boolean).join('  ·  '),
+          x: act.x,
+          width: act.width,
+        }));
+        if (!slices.length) {
+          setStatus('No acts to cut on — the artifacts need ATT&CK tactics first. Exporting one PNG instead.');
+          await exportPng(clean, state.incident, 2);
+          break;
+        }
+        setStatus(`Rasterising ${slices.length} slides…`);
+        // Without the legend: a key sliced down the middle reads as damage,
+        // and a slide has the acts band and the plane gutter to explain it.
+        // Without the incident title or the legend: the title is far wider
+        // than the gutter and would come out cut mid-word, and a key sliced
+        // down the middle reads as damage. Both are redrawn as a slide header.
+        const theme = themeByName(state.view.theme);
+        const forSlides = renderDiagram(state.incident, result, {
+          theme,
+          selectedId: null,
+          showTitle: false,
+          showLegend: false,
+          showEdgeLabels: state.view.showEdgeLabels,
+          chokePoints: chokePointMap(),
+          interactive: false,
+        });
+        const written = await exportSlices(
+          forSlides,
+          state.incident,
+          slices,
+          GUTTER_W,
+          { background: theme.bg, text: theme.text, muted: theme.textMuted, border: theme.border },
+          2,
+          (done, total) => setStatus(`Slide ${done} of ${total}…`),
+        );
+        setStatus(`${written} slides exported, one per act.`);
+        break;
+      }
       case 'json':
         exportJson(state.incident);
         setStatus('Incident JSON exported.');
@@ -823,8 +908,26 @@ setupSidebar();
 setupToolbar();
 setupCanvasInteraction();
 setupKeyboard();
-redrawAll();
-setStatus('Drop threat intelligence on the left, or load a sample, to begin.');
+
+// Pick up where the last visit left off. Nothing has left the machine — this
+// is the same browser's own storage — but say so, because an incident already
+// on screen at boot is otherwise alarming.
+const restored = autosave.restore();
+if (restored) {
+  state.incident = restored.incident;
+  redrawAll();
+  fitToWindow();
+  const when = restored.savedAt ? ` (saved ${restored.savedAt.replace('.000Z', 'Z')})` : '';
+  setStatus(
+    `Restored “${state.incident.name}” — ${state.incident.nodes.length} artifacts${when}. “Start a new incident” clears it.`,
+  );
+} else {
+  redrawAll();
+  setStatus('Drop threat intelligence on the left, or load a sample, to begin.');
+}
+
+// A debounce never fires on the way out of the tab.
+window.addEventListener('beforeunload', () => autosave.saveNow(state.incident));
 
 window.addEventListener('resize', () => applyTransform());
 

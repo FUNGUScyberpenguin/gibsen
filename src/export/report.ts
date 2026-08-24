@@ -10,6 +10,7 @@ import type { Incident, GibsenNode } from '../model/types';
 import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, TACTICS } from '../model/taxonomy';
 import { timeframe } from '../model/incident';
 import { findChokePoints } from '../analysis/congruence';
+import { buildStory } from '../model/story';
 
 function tacticLabel(node: GibsenNode): string {
   if (!node.tactic) return '—';
@@ -49,6 +50,30 @@ export function toMarkdownReport(incident: Incident): string {
     `| **Generated** | ${new Date().toISOString()} |`,
     '',
   );
+
+  // --- what happened ----------------------------------------------------
+  // The narrative first, because a reader who stops after one section should
+  // have got the story rather than the first third of a table. It is the same
+  // walk the studio shows on screen, written down.
+  const beats = buildStory(incident);
+  if (beats.length) {
+    lines.push('## What happened', '');
+    let act: string | null | undefined;
+
+    beats.forEach((beat, i) => {
+      if (beat.act !== act) {
+        act = beat.act;
+        // A heading needs air above it, or the list swallows it.
+        if (act) lines.push('', `### ${act}`, '');
+      }
+      const when = beat.t ? stamp(beat.t) : 'unsequenced';
+      const since = beat.since ? ` _(${beat.since})_` : '';
+      lines.push(`${i + 1}. **${when}**${since} — ${beat.sentence}`);
+      // Four spaces keeps the quote inside the list item for both `9.` and `10.`.
+      if (beat.commentary) lines.push(`    > ${beat.commentary.replace(/\n+/g, ' ')}`);
+    });
+    lines.push('');
+  }
 
   // --- timeline ---------------------------------------------------------
   const sequenced = incident.nodes

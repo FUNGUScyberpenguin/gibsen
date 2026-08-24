@@ -14,7 +14,7 @@
  */
 
 import type { GibsenEdge, GibsenNode, Incident } from './types';
-import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, resolvePlane } from './taxonomy';
+import { CATEGORY_BY_ID, PLANE_BY_ID, RELATION_BY_ID, TACTICS, resolvePlane } from './taxonomy';
 import { elapsedInWords } from './time';
 
 // Re-exported: the walkthrough was where this started life, and the tests and
@@ -38,6 +38,8 @@ export interface StoryBeat {
   since: string | null;
   /** The analyst's own note, verbatim, if they wrote one. */
   commentary: string;
+  /** The act this beat belongs to, or null when the tactics support none. */
+  act: string | null;
 }
 
 /** Chronological, with anything unsequenced left to the end. */
@@ -113,11 +115,50 @@ export function buildStory(incident: Incident): StoryBeat[] {
       sentence,
       since: previousTime && node.t ? elapsedInWords(previousTime, node.t) : null,
       commentary: node.commentary.trim(),
+      act: null,
     });
 
     seen.add(node.id);
     if (node.t) previousTime = node.t;
   }
 
+  assignActs(beats, byId);
   return beats;
+}
+
+/**
+ * Name the stretches of the walk from the tactics on its artifacts.
+ *
+ * The same shape as the acts band over the diagram, but read along the beats
+ * rather than across the columns: a run of beats sharing a tactic is one act,
+ * a lone interloper between two of the same act is absorbed, and a beat with
+ * no tactic joins whichever act it fell inside.
+ */
+function assignActs(beats: StoryBeat[], byId: Map<string, GibsenNode>): void {
+  if (beats.length < 2) return;
+
+  const tactics = beats.map((b) => byId.get(b.nodeId)?.tactic ?? null);
+
+  // A beacon checking in mid-execution is not a phase of its own.
+  for (let i = 1; i < tactics.length - 1; i += 1) {
+    if (tactics[i - 1] && tactics[i - 1] === tactics[i + 1] && tactics[i] !== tactics[i - 1]) {
+      tactics[i] = tactics[i - 1];
+    }
+  }
+
+  // Carry an act forward over untagged beats, then back over the leading ones.
+  let carried: string | null = null;
+  const filled = tactics.map((tactic) => {
+    if (tactic) carried = tactic;
+    return carried;
+  });
+  const first = filled.find(Boolean) ?? null;
+  for (let i = 0; i < filled.length && !filled[i]; i += 1) filled[i] = first;
+
+  // One act covering everything says nothing the incident's name does not.
+  if (new Set(filled.filter(Boolean)).size < 2) return;
+
+  filled.forEach((tactic, i) => {
+    beats[i].act = tactic ? (TACTICS.find((t) => t.id === tactic)?.label ?? tactic) : null;
+  });
 }

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { toMarkdownReport } from '../src/export/report';
 import { emptyIncident, makeEdge, makeNode, mergeIngest, resetIds } from '../src/model/incident';
 import { parseTextReport } from '../src/ingest/text';
+import { parseCsv } from '../src/ingest/csv';
 import { SAMPLES } from '../src/samples';
 
 beforeEach(() => resetIds());
@@ -113,5 +114,51 @@ describe('toMarkdownReport', () => {
     expect(md).toContain('## Timeline');
     expect(md).toContain('## Behaviours');
     expect(md.length).toBeGreaterThan(1000);
+  });
+});
+
+describe('the narrative', () => {
+  it('leads with the story, not with a table', () => {
+    const incident = emptyIncident('Tin Kettle');
+    mergeIngest(incident, parseCsv(SAMPLES.find((s) => s.id === 'malware-path')!.content));
+    const md = toMarkdownReport(incident);
+
+    // A reader who stops after one section should have got the story.
+    expect(md.indexOf('## What happened')).toBeGreaterThan(-1);
+    expect(md.indexOf('## What happened')).toBeLessThan(md.indexOf('## Timeline'));
+  });
+
+  it('numbers the beats and groups them under act headings', () => {
+    const incident = emptyIncident('Tin Kettle');
+    mergeIngest(incident, parseCsv(SAMPLES.find((s) => s.id === 'malware-path')!.content));
+    const md = toMarkdownReport(incident);
+    const section = md.slice(md.indexOf('## What happened'), md.indexOf('## Timeline'));
+
+    expect(section).toContain('### Initial Access');
+    expect(section).toMatch(/^1\. \*\*2026-/m);
+    expect(section).toContain('The story starts with');
+    // Elapsed time in words, which a timestamp column cannot convey.
+    expect(section).toMatch(/_\(\d+ (second|minute|hour)s? later\)_/);
+  });
+
+  it('keeps the analyst commentary attached to its beat', () => {
+    const incident = emptyIncident('Noted');
+    const a = makeNode({ label: 'lure', category: 'email', t: '2026-03-02T09:00:00Z' });
+    const b = makeNode({
+      label: 'tickler.dll',
+      category: 'executable',
+      t: '2026-03-02T09:01:00Z',
+      commentary: 'Loader written to %APPDATA%.',
+    });
+    incident.nodes.push(a, b);
+    incident.edges.push(makeEdge({ from: a.id, to: b.id, relation: 'writes' }));
+
+    const md = toMarkdownReport(incident);
+    // Four spaces keeps the quote inside the list item for both `9.` and `10.`.
+    expect(md).toContain('    > Loader written to %APPDATA%.');
+  });
+
+  it('says nothing about a story it does not have', () => {
+    expect(toMarkdownReport(emptyIncident('Empty'))).not.toContain('## What happened');
   });
 });

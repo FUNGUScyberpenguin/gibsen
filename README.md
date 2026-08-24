@@ -169,6 +169,18 @@ typical step, or simply more than there was room to draw — the axis says so. A
 
 Turn **Gaps to scale** off for evenly spaced columns.
 
+### Local time, and the hours nobody was working
+
+Everything is stored and sorted in UTC — that is the only way the ordering can
+be trusted — but *03:14 on a Sunday* is a fact about the victim's clock, not
+about Greenwich, and it is one of the more useful things a diagram can say.
+
+**Local time** relabels the axis in your own zone, names that zone next to
+`TIME →` so nobody reads a local clock as UTC, and washes every column that
+falls outside 08:00–18:00 on a weekday. An attacker who kept office hours is a
+finding; so is one who did not, and neither is legible from a row of timestamps
+you have to read one entry at a time.
+
 ### Acts
 
 The artifacts already carry ATT&CK tactics, so the columns already know which
@@ -433,8 +445,9 @@ artifact is dropped.
 | **Interactive page** | One self-contained `.html` — pan, zoom, hover, open the record modal. Details below |
 | **SVG** | Self-contained — no external fonts, CSS or images. Opens anywhere |
 | **PNG** | 2× raster of the same SVG |
+| **Slides** | One 2× PNG per act, each carrying the plane gutter and a header. Details below |
 | **JSON** | The full incident, re-openable |
-| **Markdown** | Timeline, behaviours, points of congruence, per-artifact detail with logs and commentary, and a copy-pasteable indicator appendix |
+| **Markdown** | **The narrative first** — the walkthrough written down, numbered, grouped under act headings, with the elapsed time between beats — then the timeline, behaviours, points of congruence, per-artifact detail with logs and commentary, and a copy-pasteable indicator appendix |
 
 The on-screen diagram and the exported file are produced by the same renderer,
 so they cannot drift apart.
@@ -466,6 +479,22 @@ depends on: an executive reads the shape, an analyst opens the node.
 Artifact text is escaped on the way in, so a hostile label or a log excerpt
 containing `</script>` cannot break out of the page it is embedded in.
 
+### Slides
+
+A whole incident is one enormous wide image that nobody can put on a slide. The
+**Slides** export cuts it at the acts and writes one PNG per phase.
+
+Each slide carries the plane gutter, so it can be read on its own, under a
+header naming the incident, the phase and where it sits in the deck — *tin-kettle
+· 3 of 9 · Execution · 2026-03-02T09:14:00Z*. The header is drawn rather than
+cropped, because the incident title is far wider than the gutter and would
+otherwise come out cut mid-word, and the legend is left off because a key sliced
+down the middle reads as damage.
+
+A phase that occupies one column would come out a sliver, so a slice widens to a
+readable minimum and takes context from either side. Consecutive slides overlap;
+in a deck that is continuity rather than repetition.
+
 ---
 
 ## Editing
@@ -481,6 +510,17 @@ diagram, and the arrow keys step the walkthrough.
 Parser guesses are meant to be corrected. The tool's job is to save you the first
 80% of the transcription, not to be right on its own.
 
+### It keeps your work
+
+The open incident is saved to this browser's own storage as you go, and comes
+back when you return. Nothing crosses a network to make that happen — it is the
+same machine and the same browser — but losing an hour of transcription to a
+refresh once is how a tool stops being used.
+
+**Start a new incident** clears the saved copy. If an incident grows too large
+for browser storage the tool says so in the parser notes and stops trying,
+rather than failing quietly; export the incident JSON to keep it.
+
 ---
 
 ## Layout of the code
@@ -492,7 +532,7 @@ src/
   layout/      time bucketing, plane bands, interval packing, edge routing
   analysis/    points of congruence
   render/      SVG renderer and palettes
-  export/      SVG/PNG/JSON download, Markdown report, interactive page
+  export/      SVG/PNG/slides/JSON download, Markdown report, interactive page
   ui/          DOM helpers, inspector panel
   main.ts      app shell: state, uploads, zoom/pan, selection
 samples/       the sample documents (also used by the tests)

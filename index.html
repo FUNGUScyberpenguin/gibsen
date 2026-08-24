@@ -53,6 +53,7 @@
             <label class="checkbox" title="Ring the artifacts the rest of the chain depends on"><input type="checkbox" id="toggle-congruence" checked /><span>Choke points</span></label>
             <label class="checkbox" title="Let the gap before a column grow with the time it stands for"><input type="checkbox" id="toggle-scale" checked /><span>Gaps to scale</span></label>
             <label class="checkbox" title="Name the phases of the incident above the axis"><input type="checkbox" id="toggle-acts" checked /><span>Acts</span></label>
+            <label class="checkbox" title="Label the axis in your own time zone and shade the hours outside 08:00–18:00 on weekdays"><input type="checkbox" id="toggle-local-time" /><span>Local time</span></label>
           </div>
 
           <button class="btn" id="btn-theme" title="Switch between the dark and light diagram palette">Light</button>
@@ -67,6 +68,7 @@
               <button data-export="html">Interactive page</button>
               <button data-export="svg">SVG (vector)</button>
               <button data-export="png">PNG (2× raster)</button>
+              <button data-export="slides">Slides — one PNG per act</button>
               <button data-export="json">Incident JSON</button>
               <button data-export="md">Markdown report</button>
             </div>
