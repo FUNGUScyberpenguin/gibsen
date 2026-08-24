@@ -293,6 +293,28 @@ export const RELATION_BY_ID: Record<RelationId, RelationDef> = Object.fromEntrie
   RELATIONS.map((r) => [r.id, r]),
 ) as Record<RelationId, RelationDef>;
 
+/**
+ * A colour per tactic, running cool to warm along the ATT&CK order. The acts
+ * band reads as a progression rather than as fourteen unrelated labels, which
+ * is the point of naming the phases at all.
+ */
+export const TACTIC_COLOR: Record<Tactic, string> = {
+  reconnaissance: '#38bdf8',
+  'resource-development': '#22d3ee',
+  'initial-access': '#2dd4bf',
+  execution: '#4ade80',
+  persistence: '#a3e635',
+  'privilege-escalation': '#bef264',
+  'defense-evasion': '#facc15',
+  'credential-access': '#fbbf24',
+  discovery: '#fb923c',
+  'lateral-movement': '#f97316',
+  collection: '#f87171',
+  'command-and-control': '#f472b6',
+  exfiltration: '#fb7185',
+  impact: '#f43f5e',
+};
+
 export const RELATION_FAMILY_COLOR: Record<RelationDef['family'], string> = {
   delivery: '#c084fc',
   execution: '#fbbf24',

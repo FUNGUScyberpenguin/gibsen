@@ -41,3 +41,30 @@ export function parseTimestamp(raw: string | number | null | undefined): string 
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
+
+/** Elapsed time in words. Precision beyond two units is noise when narrating. */
+export function elapsedInWords(fromIso: string, toIso: string): string {
+  const ms = Date.parse(toIso) - Date.parse(fromIso);
+  if (!Number.isFinite(ms) || ms <= 0) return 'at the same moment';
+
+  const units: [number, string][] = [
+    [86_400_000, 'day'],
+    [3_600_000, 'hour'],
+    [60_000, 'minute'],
+    [1000, 'second'],
+  ];
+
+  const parts: string[] = [];
+  let rest = ms;
+  for (const [size, name] of units) {
+    const n = Math.floor(rest / size);
+    if (n > 0) {
+      parts.push(`${n} ${name}${n === 1 ? '' : 's'}`);
+      rest -= n * size;
+    }
+    if (parts.length === 2) break;
+  }
+
+  return parts.length ? `${parts.join(' ')} later` : 'a moment later';
+}
+

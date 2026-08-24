@@ -285,28 +285,61 @@ export function guessRelation(text: string): RelationId {
 }
 
 const TACTIC_CUES: { re: RegExp; tactic: Tactic }[] = [
-  { re: /\brecon|\bscann?(?:ed|ing)|\bopen(?:-| )source research/i, tactic: 'reconnaissance' },
-  { re: /\bregister(?:ed)? (?:a )?domain|\binfrastructure (?:was )?(?:set up|staged)/i, tactic: 'resource-development' },
-  { re: /\bphish|\binitial access|\bfirst (?:foothold|access)|\bfoothold|\bexploit(?:ed)? (?:the )?(?:public|internet)/i, tactic: 'initial-access' },
-  { re: /\bexecut|\bran\b|\blaunch|\bmacro|\bpowershell/i, tactic: 'execution' },
-  { re: /\bpersist|\brun key|\bscheduled task|\bservice (?:was )?creat/i, tactic: 'persistence' },
+  { re: /\brecon\b|\brecon(?:naissance)\b|\bscann?(?:ed|ing)|\bopen(?:-| )source research/i, tactic: 'reconnaissance' },
+  { re: /\bregister(?:ed)? (?:a )?domain|\bdomain registered|\binfrastructure (?:was )?(?:set up|staged)/i, tactic: 'resource-development' },
+  {
+    re: /\bphish|\binitial access|\bfirst (?:foothold|access)|\bfoothold|\blure\b|\bdeliver(?:ed|s|y|ing)\b|\bredirect(?:ed|s)? to\b|\bexploit(?:ed)? (?:the )?(?:public|internet)/i,
+    tactic: 'initial-access',
+  },
+  { re: /\bexecut(?:e|ed|ion|ing)\b|\bran\b|\blaunch(?:ed|es|ing)?\b|\bmacro\b|\bpowershell\b|\bspawned\b/i, tactic: 'execution' },
+  {
+    re: /\bpersist(?:ed|ence|ent)?\b|\brun key\b|\bregistry key\b|\bautorun\b|\bcurrentversion\\run|\bscheduled task\b|\bservice (?:was )?creat/i,
+    tactic: 'persistence',
+  },
   { re: /\bescalat|\bSYSTEM privileges|\badmin(?:istrator)? rights/i, tactic: 'privilege-escalation' },
-  { re: /\bevad|\bdisabl(?:ed|ing) (?:av|edr|defender)|\bobfuscat|\bclear(?:ed)? logs/i, tactic: 'defense-evasion' },
+  { re: /\bevad(?:e|ed|ing)\b|\bdisabl(?:ed|ing) (?:av|edr|defender)|\bobfuscat|\bclear(?:ed)? logs/i, tactic: 'defense-evasion' },
   { re: /\bcredential|\bmimikatz|\blsass|\bhash(?:es)? (?:were )?dump|\bkerberoast/i, tactic: 'credential-access' },
-  { re: /\benumerat|\bdiscover|\bnet view|\bad (?:recon|enumeration)/i, tactic: 'discovery' },
-  { re: /\blateral|\bpsexec|\bwmi(?:c)?\b|\brdp\b|\bsmb (?:share|session)/i, tactic: 'lateral-movement' },
-  { re: /\bcollect|\bstag(?:ed|ing)|\barchiv(?:ed|e)|\bcompress/i, tactic: 'collection' },
-  { re: /\bbeacon|\bc2\b|\bcommand[- ]and[- ]control|\bcallback/i, tactic: 'command-and-control' },
-  { re: /\bexfiltrat|\bdata (?:was )?(?:stolen|taken)/i, tactic: 'exfiltration' },
-  { re: /\bencrypt|\bransom|\bwip(?:ed|er)|\bdestruct|\boutage|\bshut ?down/i, tactic: 'impact' },
+  { re: /\benumerat(?:e|ed|ing|ion)\b|\bdiscover(?:ed|y)?\b|\bnet view\b|\bswept?\b|\bad (?:recon|enumeration)/i, tactic: 'discovery' },
+  {
+    re: /\blateral(?:ly)?\b|\bpsexec\b|\bwmi(?:c)?\b|\brdp\b|\bsmb (?:share|session)|\bauthenticated to\b|\bmoved to\b/i,
+    tactic: 'lateral-movement',
+  },
+  // Deliberately narrow. A bare "archive" is usually the thing being delivered,
+  // not the thing being collected, and tagging delivery as collection puts the
+  // wrong name over the opening act of the diagram.
+  {
+    re: /\bcollect(?:ed|ing|ion)?\b|\bstaged?\b|\bstaging\b|\barchived\b|\bcompress(?:ed|ing)?\b|\barchive (?:was |were )?(?:creat|written|built|assembled)/i,
+    tactic: 'collection',
+  },
+  { re: /\bbeacon(?:ed|ing|s)?\b|\bc2\b|\bcommand[- ]and[- ]control\b|\bcallback\b/i, tactic: 'command-and-control' },
+  { re: /\bexfiltrat(?:e|ed|ion|ing)\b|\bdata (?:was )?(?:stolen|taken)/i, tactic: 'exfiltration' },
+  { re: /\bencrypt|\bransom|\bwip(?:ed|er)\b|\bdestruct|\boutage\b|\bshut ?down\b|\bshadow cop/i, tactic: 'impact' },
 ];
 
-/** Guess the ATT&CK tactic a sentence is describing. */
+/**
+ * Guess the ATT&CK tactic a sentence is describing.
+ *
+ * The most specific cue wins, measured by how much of the sentence it matched,
+ * rather than whichever cue happens to sit earliest in the list. "Exfiltrated
+ * the archive to 198.51.100.77" is exfiltration; taking the first match in
+ * kill-chain order would call it collection, and the phase name over that part
+ * of the diagram would be wrong.
+ */
 export function guessTactic(text: string): Tactic | null {
+  let best: Tactic | null = null;
+  let bestLength = 0;
+
   for (const { re, tactic } of TACTIC_CUES) {
-    if (re.test(text)) return tactic;
+    const match = re.exec(text);
+    if (!match) continue;
+    // Ties go to the later cue: the further-along tactic is usually the point
+    // the sentence is making.
+    if (match[0].length >= bestLength) {
+      best = tactic;
+      bestLength = match[0].length;
+    }
   }
-  return null;
+  return best;
 }
 
 /** Words that mark an artifact as attacker-controlled rather than victim-owned. */

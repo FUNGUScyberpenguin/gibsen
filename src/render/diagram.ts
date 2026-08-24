@@ -9,8 +9,8 @@
 
 import type { Incident } from '../model/types';
 import type { LayoutResult, PositionedNode } from '../layout/layout';
-import { COL_W, GUTTER_W, HEADER_H } from '../layout/layout';
-import { CATEGORY_BY_ID, CONFIDENCE_OPACITY, PLANE_BY_ID, RELATION_BY_ID, RELATION_FAMILY_COLOR, TACTICS } from '../model/taxonomy';
+import { COL_W, GUTTER_W } from '../layout/layout';
+import { CATEGORY_BY_ID, CONFIDENCE_OPACITY, PLANE_BY_ID, RELATION_BY_ID, RELATION_FAMILY_COLOR, TACTIC_COLOR, TACTICS } from '../model/taxonomy';
 import { iconFor } from '../model/icons';
 import { condenseLabel, wrapLabel } from './label';
 import { hasDeeperRecord } from '../model/record';
@@ -207,13 +207,14 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
 
   // --- time axis --------------------------------------------------------
   const axis = el('g');
+  const headerH = result.headerHeight;
   const diagramBottom = result.height;
   for (const column of result.columns) {
     const x = column.x;
     axis.append(
       el('line', {
         x1: x - 17,
-        y1: HEADER_H,
+        y1: headerH,
         x2: x - 17,
         y2: diagramBottom - 12,
         stroke: theme.grid,
@@ -226,36 +227,97 @@ export function renderDiagram(incident: Incident, result: LayoutResult, options:
     axis.append(
       el(
         'text',
-        { x, y: HEADER_H - 26, fill: labelFill, 'font-size': 12, 'font-weight': 600, 'font-family': MONO },
+        { x, y: headerH - 26, fill: labelFill, 'font-size': 12, 'font-weight': 600, 'font-family': MONO },
         fitText(column.label, COL_W - 18, 12, true),
       ),
     );
     if (column.sublabel) {
       axis.append(
-        el('text', { x, y: HEADER_H - 42, fill: theme.textMuted, 'font-size': 10 }, column.sublabel),
+        el('text', { x, y: headerH - 42, fill: theme.textMuted, 'font-size': 10 }, column.sublabel),
       );
     }
     if (column.delta) {
       axis.append(
         el(
           'text',
-          { x: x - 22, y: HEADER_H - 26, fill: theme.textMuted, 'font-size': 9.5, 'text-anchor': 'end', 'font-family': MONO },
+          { x: x - 22, y: headerH - 26, fill: theme.textMuted, 'font-size': 9.5, 'text-anchor': 'end', 'font-family': MONO },
           column.delta,
         ),
       );
     }
+
+    // A gap too long to draw even at log scale gets said out loud, with the
+    // torn-axis mark that admits the diagram is compressing here.
+    if (column.elided) {
+      const mid = x - 17 - column.gapBefore / 2;
+      const zig = 8;
+      // The classic torn axis: two parallel zigzags saying the diagram is not
+      // to scale across this stretch, and how much it is standing in for.
+      const tear = (offset: number) => {
+        let d = `M ${mid + offset} ${headerH}`;
+        for (let yy = headerH; yy < diagramBottom - 12; yy += zig * 2) {
+          d += ` l ${zig} ${zig} l ${-zig} ${zig}`;
+        }
+        return el('path', {
+          d,
+          fill: 'none',
+          stroke: theme.textMuted,
+          'stroke-width': 1,
+          'stroke-opacity': 0.32,
+          'stroke-linejoin': 'round',
+        });
+      };
+      const pillW = Math.round(column.elided.length * 9.5 * 0.545) + 20;
+      axis.append(
+        tear(-5),
+        tear(3),
+        el('rect', {
+          x: mid - pillW / 2, y: headerH - 12, width: pillW, height: 17, rx: 8.5,
+          fill: theme.bg, stroke: theme.border, 'stroke-width': 1,
+        }),
+        el(
+          'text',
+          { x: mid, y: headerH + 0.5, fill: theme.textMuted, 'font-size': 9.5, 'text-anchor': 'middle' },
+          column.elided,
+        ),
+      );
+    }
+  }
+
+  // --- acts -------------------------------------------------------------
+  // Six names above the axis is what an audience carries out of the room.
+  for (const act of result.acts) {
+    const accent = TACTIC_COLOR[act.tactic] ?? theme.textMuted;
+    axis.append(
+      el('rect', {
+        x: act.x, y: 14, width: Math.max(act.width, 8), height: 22, rx: 6,
+        fill: accent, 'fill-opacity': 0.13, stroke: accent, 'stroke-opacity': 0.5, 'stroke-width': 1,
+      }),
+    );
+    const caption = act.duration ? `${act.label}  ·  ${act.duration}` : act.label;
+    axis.append(
+      el(
+        'text',
+        {
+          x: act.x + Math.max(act.width, 8) / 2, y: 29,
+          fill: theme.text, 'font-size': 10.5, 'font-weight': 600,
+          'text-anchor': 'middle', 'letter-spacing': 0.3,
+        },
+        fitText(caption, Math.max(act.width, 8) - 14, 10.5, false),
+      ),
+    );
   }
   axis.append(
     el('line', {
       x1: GUTTER_W,
-      y1: HEADER_H - 12,
+      y1: headerH - 12,
       x2: totalWidth - 20,
-      y2: HEADER_H - 12,
+      y2: headerH - 12,
       stroke: theme.border,
       'stroke-width': 1.2,
       'marker-end': `url(#gib-arrow-${sanitiseId(theme.textMuted)})`,
     }),
-    el('text', { x: 22, y: HEADER_H - 26, fill: theme.textMuted, 'font-size': 10, 'letter-spacing': 1.2 }, 'TIME →'),
+    el('text', { x: 22, y: headerH - 26, fill: theme.textMuted, 'font-size': 10, 'letter-spacing': 1.2 }, 'TIME →'),
   );
   root.append(axis);
 
@@ -647,6 +709,19 @@ function renderLegend(
           }),
         ),
       'point of congruence',
+    );
+  }
+
+  if (result.columns.some((c) => c.elided)) {
+    marker(
+      () =>
+        group.append(
+          el('path', {
+            d: `M ${x + 5} ${row(3) - 9} l 5 4.5 l -5 4.5 l 5 4.5`,
+            fill: 'none', stroke: theme.textMuted, 'stroke-width': 1, 'stroke-linejoin': 'round',
+          }),
+        ),
+      'time not to scale across here',
     );
   }
 

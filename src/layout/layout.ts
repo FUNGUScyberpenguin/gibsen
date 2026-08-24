@@ -2,15 +2,20 @@
  * Time-driven artifact-plane layout.
  *
  * The X axis is time and the Y axis clusters artifacts by where you go looking
- * for them. Columns are equal width rather than proportional to elapsed time on
- * purpose: an incident that jumps from a 90-second exploit chain to a dwell of
- * three weeks would be unreadable to scale, and the sequence is what the
- * diagram is for. The real interval is always printed on the axis, so nothing
- * is hidden.
+ * for them.
+ *
+ * Columns are not drawn to scale — three weeks of dwell beside a 90-second
+ * exploit chain would be unreadable — but nor are they all the same width, or
+ * the shape of the attack disappears entirely. The gap before a column grows
+ * with the logarithm of the real interval, so a minute and a day look
+ * different without a day swamping the page. Where even that runs out of room
+ * the axis says so with a break, rather than quietly compressing. The exact
+ * interval is printed either way, so nothing is hidden.
  */
 
-import type { GibsenEdge, GibsenNode, Incident, PlaneId, PlaneSetId } from '../model/types';
-import { planesFor, resolvePlane } from '../model/taxonomy';
+import type { GibsenEdge, GibsenNode, Incident, PlaneId, PlaneSetId, Tactic } from '../model/types';
+import { TACTICS, planesFor, resolvePlane } from '../model/taxonomy';
+import { elapsedInWords } from '../model/time';
 
 /** Baseline node box. The real width and height come out of `layout`, which
  * sizes them to the labels the incident actually contains. */
@@ -32,6 +37,27 @@ export const HEADER_H = 72;
 const CANVAS_PAD = 28;
 
 export const COL_W = NODE_W + COL_GAP;
+
+/**
+ * How much wider the gap before a column gets for each doubling of the real
+ * interval. Logarithmic because incidents span six orders of magnitude — a
+ * two-second gap and a two-week gap belong on the same axis.
+ */
+const GAP_PER_DOUBLING = 27;
+/**
+ * Past this the gap stops growing. A wide diagram is free; an empty one is
+ * not, and a reader scrolling through a thousand pixels of nothing has lost
+ * the thread by the time they arrive.
+ */
+const GAP_MAX = 320;
+/**
+ * How many times the typical step a gap has to be before the axis marks it.
+ * Measured against the median rather than the shortest interval: a report full
+ * of one-second bursts should not have every ordinary pause torn open.
+ */
+const DWELL_RATIO = 20;
+/** Height of the band of named acts above the time axis. */
+const ACT_BAND_H = 34;
 
 export type Granularity =
   | 'second'
@@ -119,6 +145,13 @@ export interface TimeColumn {
   sublabel: string | null;
   /** Gap to the previous column in human terms, e.g. `+ 3d 4h`. */
   delta: string | null;
+  /** Blank space drawn before this column, standing for the interval. */
+  gapBefore: number;
+  /**
+   * Set when the gap was too large to draw even at log scale, and the axis is
+   * showing a break. Carries the words to print across it.
+   */
+  elided: string | null;
 }
 
 export interface PlaneBand {
@@ -131,6 +164,24 @@ export interface PlaneBand {
   boundary: boolean;
   y: number;
   height: number;
+}
+
+/**
+ * A named stretch of the incident, taken from the ATT&CK tactics already on
+ * the artifacts. Six labels above the axis is what an audience carries out of
+ * the room; two hundred columns is not.
+ */
+export interface Act {
+  tactic: Tactic;
+  label: string;
+  startCol: number;
+  endCol: number;
+  x: number;
+  width: number;
+  /** First and last instant covered, and how long that was, in words. */
+  from: string | null;
+  to: string | null;
+  duration: string | null;
 }
 
 export interface PositionedNode {
@@ -172,6 +223,10 @@ export interface LayoutResult {
   edges: RoutedEdge[];
   granularity: Granularity;
   planeSet: PlaneSetId;
+  /** Named stretches of the incident, empty when the tactics do not support any. */
+  acts: Act[];
+  /** Top margin actually used, which grows to make room for the acts band. */
+  headerHeight: number;
   /** Box size chosen for this incident's labels; the renderer uses these. */
   nodeWidth: number;
   nodeHeight: number;
@@ -192,6 +247,13 @@ export interface LayoutOptions {
    */
   showEmptyPlanes?: boolean;
   maxColumns?: number;
+  /**
+   * Let the gap before a column grow with the interval it stands for. On by
+   * default: without it the diagram records the sequence but hides the rhythm.
+   */
+  timeToScale?: boolean;
+  /** Draw the band of named acts above the axis. */
+  showActs?: boolean;
 }
 
 function formatColumnLabel(iso: string, granularity: Granularity): { label: string; sublabel: string } {
@@ -258,6 +320,75 @@ export function labelLineCount(label: string): number {
   return Math.min(LABEL_MAX_LINES, Math.max(1, Math.ceil(label.length / LABEL_CHARS_PER_LINE)));
 }
 
+/**
+ * Name the stretches of the incident from the tactics on its artifacts.
+ *
+ * Each column takes the tactic most of its artifacts carry, ties going to the
+ * one further along the ATT&CK order because progress is the story. Runs of
+ * the same tactic then merge into one act. A column with no tagged artifact
+ * inherits whatever act it fell inside, so a quiet stretch does not break a
+ * phase in half.
+ */
+function deriveActs(
+  columns: TimeColumn[],
+  placements: Placement[],
+): { tactic: Tactic; startCol: number; endCol: number }[] {
+  const rank = new Map(TACTICS.map((t, i) => [t.id, i]));
+  const perColumn: (Tactic | null)[] = columns.map(() => null);
+
+  const counts: Map<Tactic, number>[] = columns.map(() => new Map());
+  for (const p of placements) {
+    if (!p.node.tactic) continue;
+    // A long-running artifact votes only where it starts. Its presence in the
+    // later columns is duration, not a new event, and letting a twenty-hour
+    // beacon stuff "command and control" into every column it crosses drowns
+    // out the phases that actually happened during it.
+    const bucket = counts[p.startCol];
+    if (bucket) bucket.set(p.node.tactic, (bucket.get(p.node.tactic) ?? 0) + 1);
+  }
+
+  counts.forEach((bucket, c) => {
+    let best: Tactic | null = null;
+    let bestCount = 0;
+    for (const [tactic, count] of bucket) {
+      const better = count > bestCount || (count === bestCount && (rank.get(tactic) ?? 0) > (rank.get(best!) ?? -1));
+      if (better) {
+        best = tactic;
+        bestCount = count;
+      }
+    }
+    perColumn[c] = best;
+  });
+
+  // A single column of another tactic between two of the same one is a beacon
+  // checking in mid-phase, not a phase of its own.
+  for (let c = 1; c < perColumn.length - 1; c += 1) {
+    if (perColumn[c - 1] && perColumn[c - 1] === perColumn[c + 1] && perColumn[c] !== perColumn[c - 1]) {
+      perColumn[c] = perColumn[c - 1];
+    }
+  }
+
+  const acts: { tactic: Tactic; startCol: number; endCol: number }[] = [];
+  perColumn.forEach((tactic, c) => {
+    // An untagged column extends the act it sits inside rather than ending it.
+    if (!tactic) {
+      if (acts.length) acts[acts.length - 1].endCol = c;
+      return;
+    }
+    const open = acts[acts.length - 1];
+    if (open && open.tactic === tactic) open.endCol = c;
+    else acts.push({ tactic, startCol: c, endCol: c });
+  });
+
+  // Untagged columns before the first act have nothing to extend, and a band
+  // that starts a third of the way along reads as a rendering fault. The
+  // opening act reaches back to the start of the axis.
+  if (acts.length) acts[0].startCol = 0;
+
+  // One act covering everything says nothing that the title does not.
+  return acts.length >= 2 ? acts : [];
+}
+
 export function layout(incident: Incident, options: LayoutOptions = {}): LayoutResult {
   const planeSet = options.planeSet ?? incident.planeSet ?? 'talk';
 
@@ -283,17 +414,63 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   const bucketKeys = [...new Set(stamps.map((s) => bucketStart(s, granularity)))].sort();
   const hasUnsequenced = incident.nodes.some((n) => !n.t);
 
+  const toScale = options.timeToScale ?? true;
+
+  /**
+   * The shortest real interval in the incident, used as the unit the others
+   * are measured against. Scaling from the smallest gap rather than from a
+   * fixed constant is what keeps a four-minute intrusion and a four-month
+   * campaign both legible on the same rules.
+   */
+  let unit = Number.POSITIVE_INFINITY;
+  for (let i = 1; i < bucketKeys.length; i += 1) {
+    const step = Date.parse(bucketKeys[i]) - Date.parse(bucketKeys[i - 1]);
+    if (step > 0) unit = Math.min(unit, step);
+  }
+  if (!Number.isFinite(unit) || unit <= 0) unit = GRANULARITY_MS[granularity] ?? 60_000;
+
+  /** The typical step, used to decide which gaps are dwell rather than pace. */
+  const steps: number[] = [];
+  for (let i = 1; i < bucketKeys.length; i += 1) {
+    const step = Date.parse(bucketKeys[i]) - Date.parse(bucketKeys[i - 1]);
+    if (step > 0) steps.push(step);
+  }
+  steps.sort((a, b) => a - b);
+  const median = steps.length ? steps[Math.floor(steps.length / 2)] : unit;
+
+  /**
+   * Blank space standing for an interval, and whether the axis should say out
+   * loud what it is compressing. A gap is marked when it dwarfs the pace of
+   * the rest of the incident — that is the dwell an audience should notice —
+   * or when it ran out of room to be drawn honestly.
+   */
+  const gapFor = (fromIso: string, toIso: string): { gap: number; elided: string | null } => {
+    if (!toScale) return { gap: 0, elided: null };
+    const ms = Date.parse(toIso) - Date.parse(fromIso);
+    if (!Number.isFinite(ms) || ms <= unit) return { gap: 0, elided: null };
+
+    const wanted = GAP_PER_DOUBLING * Math.log2(ms / unit);
+    const dwell = ms >= median * DWELL_RATIO;
+    const gap = Math.min(Math.round(wanted), GAP_MAX);
+    return { gap, elided: dwell || wanted > GAP_MAX ? elapsedInWords(fromIso, toIso) : null };
+  };
+
   const columns: TimeColumn[] = [];
   let index = 0;
+  let cursor = GUTTER_W + CANVAS_PAD;
+
   if (hasUnsequenced) {
     columns.push({
       key: null,
       index: index++,
-      x: GUTTER_W + CANVAS_PAD,
+      x: cursor,
       label: 'Unsequenced',
       sublabel: null,
       delta: null,
+      gapBefore: 0,
+      elided: null,
     });
+    cursor += COL_W;
   }
 
   let previousDay = '';
@@ -302,20 +479,35 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
     const showSub = sublabel && sublabel !== previousDay;
     if (sublabel) previousDay = sublabel;
     const prevKey = bucketKeys[position - 1];
+    const { gap, elided } = prevKey ? gapFor(prevKey, key) : { gap: 0, elided: null };
+
+    cursor += gap;
     columns.push({
       key,
       index,
-      x: GUTTER_W + CANVAS_PAD + index * COL_W,
+      x: cursor,
       label,
       sublabel: showSub ? sublabel : null,
       delta: prevKey ? formatDelta(prevKey, key) : null,
+      gapBefore: gap,
+      elided,
     });
+    cursor += COL_W;
     index += 1;
   });
 
   if (columns.length === 0) {
     // Nothing to draw, but keep one column so the axis still renders.
-    columns.push({ key: null, index: 0, x: GUTTER_W + CANVAS_PAD, label: 'Unsequenced', sublabel: null, delta: null });
+    columns.push({
+      key: null,
+      index: 0,
+      x: GUTTER_W + CANVAS_PAD,
+      label: 'Unsequenced',
+      sublabel: null,
+      delta: null,
+      gapBefore: 0,
+      elided: null,
+    });
   }
 
   const columnIndexByKey = new Map<string | null, number>(columns.map((c) => [c.key, c.index]));
@@ -381,7 +573,12 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
   }
 
   const bands: PlaneBand[] = [];
-  let y = HEADER_H + CANVAS_PAD;
+  // Acts are needed before the bands are placed: the band of names sits above
+  // the axis and everything below it has to start lower.
+  const actRuns = (options.showActs ?? true) ? deriveActs(columns, placements) : [];
+  const headerHeight = HEADER_H + (actRuns.length ? ACT_BAND_H : 0);
+
+  let y = headerHeight + CANVAS_PAD;
 
   for (const plane of visiblePlanes) {
     const lanes = laneCount.get(plane.id) ?? 1;
@@ -416,7 +613,7 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
     const pad = band.boundary ? SEAM_PAD : BAND_PAD;
     const x = columns[p.startCol].x;
     const nodeY = band.y + pad + lane * (nodeHeight + ROW_GAP);
-    const w = NODE_W + (p.endCol - p.startCol) * COL_W;
+    const w = columns[p.endCol].x - columns[p.startCol].x + NODE_W;
 
     positioned.push({
       node: p.node,
@@ -442,8 +639,25 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
     routed.push(routeEdge(edge, a, b));
   }
 
-  const width = GUTTER_W + CANVAS_PAD * 2 + columns.length * COL_W;
+  const last = columns[columns.length - 1];
+  const width = last.x + COL_W + CANVAS_PAD;
   const height = y + CANVAS_PAD;
+
+  const acts: Act[] = actRuns.map((run) => {
+    const from = columns[run.startCol].key;
+    const to = columns[run.endCol].key;
+    return {
+      tactic: run.tactic,
+      label: TACTICS.find((t) => t.id === run.tactic)?.label ?? run.tactic,
+      startCol: run.startCol,
+      endCol: run.endCol,
+      x: columns[run.startCol].x - 17,
+      width: columns[run.endCol].x + COL_W - 17 - columns[run.startCol].x,
+      from,
+      to,
+      duration: from && to && from !== to ? elapsedInWords(from, to).replace(/ later$/, '') : null,
+    };
+  });
 
   return {
     width,
@@ -454,6 +668,8 @@ export function layout(incident: Incident, options: LayoutOptions = {}): LayoutR
     edges: routed,
     granularity,
     planeSet,
+    acts,
+    headerHeight,
     nodeWidth: NODE_W,
     nodeHeight,
     labelLines,

@@ -334,3 +334,208 @@ describe('layout', () => {
     expect(talk.columns.length).toBeGreaterThan(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The elastic axis
+// ---------------------------------------------------------------------------
+
+/** An incident whose artifacts sit at the given offsets, in minutes. */
+function atMinutes(offsets: number[], tactics: (string | null)[] = []): Incident {
+  const incident = emptyIncident('Paced');
+  offsets.forEach((minutes, i) => {
+    incident.nodes.push(
+      makeNode({
+        label: `artifact-${i}`,
+        category: 'file',
+        t: new Date(Date.UTC(2026, 2, 2, 9, 0) + minutes * 60_000).toISOString(),
+        tactic: (tactics[i] ?? null) as never,
+      }),
+    );
+  });
+  return incident;
+}
+
+describe('columns to scale', () => {
+  it('leaves no gap before the first column', () => {
+    const { columns } = layout(atMinutes([0, 1, 2]), { granularity: 'minute' });
+    expect(columns[0].gapBefore).toBe(0);
+  });
+
+  it('gives a longer interval a wider gap', () => {
+    // One minute, then ten, then four hours.
+    const { columns } = layout(atMinutes([0, 1, 11, 251]), { granularity: 'minute' });
+    const gaps = columns.map((c) => c.gapBefore);
+
+    expect(gaps[0]).toBe(0);
+    expect(gaps[1]).toBe(0); // the unit interval itself earns no extra room
+    expect(gaps[2]).toBeGreaterThan(gaps[1]);
+    expect(gaps[3]).toBeGreaterThan(gaps[2]);
+  });
+
+  it('grows with the logarithm, so a long dwell cannot swamp the page', () => {
+    const { columns } = layout(atMinutes([0, 1, 3, 1441]), { granularity: 'minute' });
+    const [, , twoMinutes, oneDay] = columns.map((c) => c.gapBefore);
+
+    // A day is 720× two minutes; its gap is nowhere near 720× as wide.
+    expect(oneDay).toBeGreaterThan(twoMinutes);
+    expect(oneDay).toBeLessThan(twoMinutes * 12);
+  });
+
+  it('says so out loud when a gap is too long to draw', () => {
+    // Sixty days after the opening move.
+    const { columns } = layout(atMinutes([0, 1, 2, 60 * 24 * 60]), { granularity: 'minute' });
+    const last = columns[columns.length - 1];
+
+    expect(last.elided).toBeTruthy();
+    expect(last.elided).toMatch(/^\d+ days/);
+    // Capped rather than allowed to run away.
+    expect(last.gapBefore).toBeLessThan(400);
+  });
+
+  it('keeps the columns in order and the diagram wide enough for them', () => {
+    const result = layout(atMinutes([0, 1, 11, 251]), { granularity: 'minute' });
+    const xs = result.columns.map((c) => c.x);
+    expect([...xs].sort((a, b) => a - b)).toEqual(xs);
+    expect(result.width).toBeGreaterThan(xs[xs.length - 1]);
+  });
+
+  it('falls back to even columns when asked', () => {
+    const spaced = layout(atMinutes([0, 1, 11, 251]), { granularity: 'minute', timeToScale: false });
+    expect(spaced.columns.every((c) => c.gapBefore === 0)).toBe(true);
+    expect(spaced.columns.every((c) => c.elided === null)).toBe(true);
+
+    // And the even layout is the narrower of the two.
+    const scaled = layout(atMinutes([0, 1, 11, 251]), { granularity: 'minute' });
+    expect(spaced.width).toBeLessThan(scaled.width);
+  });
+
+  it('stretches a spanning artifact to the column its end really falls in', () => {
+    const incident = emptyIncident('Beacon');
+    incident.nodes.push(
+      makeNode({ label: 'start', category: 'file', t: '2026-03-02T09:00:00Z' }),
+      makeNode({ label: 'gap', category: 'file', t: '2026-03-02T09:01:00Z' }),
+      makeNode({
+        label: 'svchost.exe',
+        category: 'process',
+        t: '2026-03-02T09:00:00Z',
+        tEnd: '2026-03-02T13:00:00Z',
+      }),
+      makeNode({ label: 'end', category: 'file', t: '2026-03-02T13:00:00Z' }),
+    );
+
+    const result = layout(incident, { granularity: 'minute' });
+    const beacon = result.nodes.find((n) => n.node.label === 'svchost.exe')!;
+    const lastColumn = result.columns[result.columns.length - 1];
+
+    expect(beacon.spanning).toBe(true);
+    // Its right edge lands on the final column, gaps included.
+    expect(beacon.x + beacon.w).toBeCloseTo(lastColumn.x + result.nodeWidth, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Acts
+// ---------------------------------------------------------------------------
+
+describe('acts', () => {
+  it('merges a run of columns sharing a tactic into one named act', () => {
+    const incident = atMinutes([0, 1, 2, 3], ['execution', 'execution', 'impact', 'impact']);
+    const { acts } = layout(incident, { granularity: 'minute' });
+
+    expect(acts.map((a) => a.label)).toEqual(['Execution', 'Impact']);
+    expect(acts[0].startCol).toBe(0);
+    expect(acts[1].startCol).toBe(2);
+  });
+
+  it('reaches back to the start of the axis when the opening columns are untagged', () => {
+    const incident = atMinutes([0, 1, 2, 3], [null, null, 'execution', 'impact']);
+    const { acts } = layout(incident, { granularity: 'minute' });
+
+    // A band that starts a third of the way along reads as a rendering fault.
+    expect(acts[0].startCol).toBe(0);
+    expect(acts[0].x).toBeLessThanOrEqual(layout(incident, { granularity: 'minute' }).columns[0].x);
+  });
+
+  it('absorbs a single interloping column rather than breaking the phase in two', () => {
+    // A beacon checking in mid-execution is not a phase of its own.
+    const incident = atMinutes([0, 1, 2], ['execution', 'command-and-control', 'execution']);
+    const { acts } = layout(incident, { granularity: 'minute' });
+    expect(acts).toEqual([]); // one act covering everything is dropped as saying nothing
+  });
+
+  it('lets an untagged column extend the act it sits inside', () => {
+    const incident = atMinutes([0, 1, 2, 3], ['execution', null, 'impact', 'impact']);
+    const { acts } = layout(incident, { granularity: 'minute' });
+
+    expect(acts.map((a) => a.label)).toEqual(['Execution', 'Impact']);
+    expect(acts[0].endCol).toBe(1);
+  });
+
+  it('says nothing when one act would cover the whole incident', () => {
+    const incident = atMinutes([0, 1, 2], ['execution', 'execution', 'execution']);
+    expect(layout(incident, { granularity: 'minute' }).acts).toEqual([]);
+  });
+
+  it('says nothing when no artifact carries a tactic', () => {
+    expect(layout(atMinutes([0, 1, 2]), { granularity: 'minute' }).acts).toEqual([]);
+  });
+
+  it('reports how long an act ran, when it ran across more than one column', () => {
+    const incident = atMinutes([0, 1, 2, 62], ['execution', 'execution', 'execution', 'impact']);
+    const { acts } = layout(incident, { granularity: 'minute' });
+    expect(acts[0].duration).toBe('2 minutes');
+    expect(acts[1].duration).toBe(null);
+  });
+
+  it('makes room above the axis only when there are acts to put there', () => {
+    const withActs = layout(atMinutes([0, 1], ['execution', 'impact']), { granularity: 'minute' });
+    const without = layout(atMinutes([0, 1]), { granularity: 'minute' });
+
+    expect(withActs.headerHeight).toBeGreaterThan(without.headerHeight);
+    // And everything below starts lower to match.
+    expect(withActs.bands[0].y).toBeGreaterThan(without.bands[0].y);
+  });
+
+  it('can be turned off', () => {
+    const off = layout(atMinutes([0, 1], ['execution', 'impact']), { granularity: 'minute', showActs: false });
+    expect(off.acts).toEqual([]);
+    expect(off.headerHeight).toBe(layout(atMinutes([0, 1]), { granularity: 'minute' }).headerHeight);
+  });
+
+  it('names the phases of a real sample in kill-chain order', () => {
+    const incident = emptyIncident('Sample');
+    mergeIngest(incident, parseCsv(SAMPLES.find((s) => s.id === 'malware-path')!.content));
+
+    const { acts } = layout(incident);
+    const labels = acts.map((a) => a.label);
+
+    expect(acts.length).toBeGreaterThan(2);
+    expect(labels[0]).toBe('Initial Access');
+    expect(labels).toContain('Impact');
+    expect(labels).toContain('Exfiltration');
+    // Whatever the phases turn out to be, they tile the axis in order.
+    acts.forEach((act, i) => {
+      expect(act.endCol).toBeGreaterThanOrEqual(act.startCol);
+      if (i > 0) expect(act.startCol).toBeGreaterThan(acts[i - 1].endCol);
+    });
+  });
+
+  it('does not let one long-running artifact stamp its tactic over the whole incident', () => {
+    const incident = emptyIncident('Beacon');
+    incident.nodes.push(
+      makeNode({ label: 'lure', category: 'email', t: '2026-03-02T09:00:00Z', tactic: 'initial-access' }),
+      makeNode({
+        label: 'svchost.exe',
+        category: 'process',
+        t: '2026-03-02T09:01:00Z',
+        tEnd: '2026-03-02T09:05:00Z',
+        tactic: 'command-and-control',
+      }),
+      makeNode({ label: 'ransomware', category: 'ransomware', t: '2026-03-02T09:04:00Z', tactic: 'impact' }),
+      makeNode({ label: 'note.txt', category: 'ransom-note', t: '2026-03-02T09:05:00Z', tactic: 'impact' }),
+    );
+
+    // The beacon spans to the end, but impact still gets its own act.
+    expect(layout(incident, { granularity: 'minute' }).acts.map((a) => a.label)).toContain('Impact');
+  });
+});

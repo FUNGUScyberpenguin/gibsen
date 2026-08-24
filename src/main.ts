@@ -37,6 +37,10 @@ interface ViewOptions {
   showEmptyPlanes: boolean;
   /** Ring the artifacts the rest of the chain depends on. */
   showCongruence: boolean;
+  /** Let the gap before a column grow with the interval it stands for. */
+  timeToScale: boolean;
+  /** Name the stretches of the incident above the axis. */
+  showActs: boolean;
 }
 
 const state = {
@@ -49,6 +53,8 @@ const state = {
     showEdgeLabels: true,
     showEmptyPlanes: false,
     showCongruence: true,
+    timeToScale: true,
+    showActs: true,
   } as ViewOptions,
   zoom: { scale: 1, tx: 24, ty: 24 },
   linkSource: null as string | null,
@@ -83,6 +89,8 @@ const els = {
   granularity: byId<HTMLSelectElement>('granularity'),
   planeSet: byId<HTMLSelectElement>('plane-set'),
   toggleCongruence: byId<HTMLInputElement>('toggle-congruence'),
+  toggleScale: byId<HTMLInputElement>('toggle-scale'),
+  toggleActs: byId<HTMLInputElement>('toggle-acts'),
   toggleLegend: byId<HTMLInputElement>('toggle-legend'),
   toggleEdgeLabels: byId<HTMLInputElement>('toggle-edge-labels'),
   toggleEmptyPlanes: byId<HTMLInputElement>('toggle-empty-planes'),
@@ -122,6 +130,8 @@ function drawDiagram(): void {
   const result = layout(state.incident, {
     granularity: state.view.granularity,
     showEmptyPlanes: state.view.showEmptyPlanes,
+    timeToScale: state.view.timeToScale,
+    showActs: state.view.showActs,
   });
 
   const svg = renderDiagram(state.incident, result, {
@@ -629,6 +639,16 @@ function setupToolbar(): void {
     drawDiagram();
   });
 
+  els.toggleScale.addEventListener('change', () => {
+    state.view.timeToScale = els.toggleScale.checked;
+    drawDiagram();
+  });
+
+  els.toggleActs.addEventListener('change', () => {
+    state.view.showActs = els.toggleActs.checked;
+    drawDiagram();
+  });
+
   els.toggleLegend.addEventListener('change', () => {
     state.view.showLegend = els.toggleLegend.checked;
     drawDiagram();
@@ -698,6 +718,8 @@ async function runExport(kind: string): Promise<void> {
   const result = layout(state.incident, {
     granularity: state.view.granularity,
     showEmptyPlanes: state.view.showEmptyPlanes,
+    timeToScale: state.view.timeToScale,
+    showActs: state.view.showActs,
   });
   const clean = renderDiagram(state.incident, result, {
     theme: themeByName(state.view.theme),

@@ -149,6 +149,48 @@ columns rather than collapsing into one minute. A wide diagram costs nothing; a
 diagram that has quietly stopped distinguishing 09:14:10 from 09:14:20 costs the
 reader the thing they came for.
 
+### The axis, and the shape of the attack
+
+Columns are not drawn to scale — three weeks of dwell beside a 90-second
+exploit chain would be unreadable — but nor are they all the same width, or the
+rhythm of the attack disappears and you are left reading interval labels one at
+a time.
+
+The gap before a column grows with the **logarithm** of the real interval. A
+minute and a day look different without a day swamping the page, and an
+incident's shape becomes something you see rather than something you work out:
+the frantic first two minutes, the long quiet stretch, the twenty-five minute
+smash-and-grab at the end.
+
+Where a gap dwarfs the pace of the rest of the incident — twenty times the
+typical step, or simply more than there was room to draw — the axis says so. A
+**torn axis** runs down the diagram with the interval written across it:
+*59 days 16 hours later*. Compression is fine; hiding it is not.
+
+Turn **Gaps to scale** off for evenly spaced columns.
+
+### Acts
+
+The artifacts already carry ATT&CK tactics, so the columns already know which
+phase of the intrusion they belong to. **Acts** draws that as a band above the
+axis — *Initial Access · 1 minute*, *Execution*, *Command and Control · 59 days
+16 hours*, *Lateral Movement*, *Collection*, *Exfiltration*, *Impact* — coloured
+cool to warm along the kill chain, so the band reads as a progression rather
+than as fourteen unrelated labels.
+
+Six names above the axis is what an audience carries out of the room; two
+hundred columns is not.
+
+- A run of columns sharing a tactic becomes one act; an untagged column extends
+  the act it sits inside rather than breaking a phase in half
+- A single interloping column — a beacon checking in mid-execution — is absorbed
+  rather than promoted to a phase of its own
+- A long-running artifact votes only in the column it **starts** in. Its
+  presence in the later ones is duration, not a new event, and a twenty-hour
+  beacon otherwise stamps "command and control" over everything it crosses
+- One act covering the whole incident says nothing the title does not, so it is
+  dropped
+
 ### The walkthrough
 
 The feature the whole tool is pointed at. A finished diagram explains itself to
@@ -313,6 +355,11 @@ The parser that does the most work, and the one you will correct most.
   `the HMI at 10.20.4.21`) and categorises them by role
 - A sentence naming no artifact — *"This is attacker-controlled C2
   infrastructure."* — is treated as commentary on the rest of its paragraph
+- **Tactics are guessed by the most specific cue, not the first one.**
+  *"Exfiltrated the archive to 198.51.100.77"* is exfiltration; taking the first
+  match in kill-chain order called it collection, and since the acts band puts
+  the phase name over that stretch of the diagram, a mis-tag is now visible
+  rather than buried in a field nobody reads
 - Later mentions **sharpen** earlier ones: an address first read as an IP becomes
   a C2 server once a sentence says so, without forking into two nodes
 
