@@ -5,6 +5,13 @@ import type { ChokePoint } from '../analysis/congruence';
 import type { Theme } from '../render/theme';
 import { toMarkdownReport } from './report';
 import { buildInteractiveHtml } from './interactive';
+import { SLIDE_HEADER_H, sliceCaption, sliceWindow, type DiagramSlice } from './slices';
+import { slugify } from './filename';
+
+// Both moved out so the headless renderer can share them; re-exported here
+// because the app and the tests have always reached for them at this address.
+export { slugify };
+export type { DiagramSlice };
 
 /**
  * Serialise a rendered diagram.
@@ -44,16 +51,6 @@ export function downloadBlob(filename: string, blob: Blob): void {
   a.remove();
   // Revoke on the next tick so the navigation has definitely started.
   setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-/** Filesystem-safe stem derived from the incident name. */
-export function slugify(name: string): string {
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return slug || 'incident';
 }
 
 export function exportSvg(svg: SVGSVGElement, incident: Incident): void {
@@ -120,27 +117,12 @@ async function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return blob;
 }
 
-/** One slice of the diagram: the plane gutter, then a stretch of the timeline. */
-export interface DiagramSlice {
-  /** Used in the filename and printed on the slide, so keep it short. */
-  name: string;
-  /** Secondary line under the name — a time range, usually. */
-  subtitle?: string;
-  x: number;
-  width: number;
-}
-
 export interface SliceStyle {
   background: string;
   text: string;
   muted: string;
   border: string;
 }
-
-const SLIDE_HEADER_H = 52;
-const SLICE_PAD = 10;
-/** Below this a slice is a sliver; it borrows context from either side. */
-const SLICE_MIN_W = 700;
 
 const SLIDE_SANS = 'ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
@@ -166,16 +148,7 @@ export async function exportSlices(
   let written = 0;
 
   for (const [index, slice] of slices.entries()) {
-    // A single-column act would come out a sliver. Widen it symmetrically and
-    // let the slides overlap — continuity between them is a feature in a deck.
-    const wanted = Math.max(slice.width + SLICE_PAD * 2, SLICE_MIN_W);
-    const centre = slice.x + slice.width / 2;
-    let from = Math.round(centre - wanted / 2);
-    let span = Math.round(wanted);
-
-    from = Math.max(gutterWidth, Math.min(from, fullWidth - span));
-    from = Math.max(gutterWidth, from);
-    span = Math.max(1, Math.min(span, fullWidth - from));
+    const { from, span } = sliceWindow(slice, fullWidth, gutterWidth);
 
     const canvasW = gutterWidth + span;
     const canvasH = height + SLIDE_HEADER_H;
@@ -199,8 +172,7 @@ export async function exportSlices(
 
     ctx.fillStyle = style.muted;
     ctx.font = `12px ${SLIDE_SANS}`;
-    const caption = [`${index + 1} of ${slices.length}`, slice.name, slice.subtitle].filter(Boolean).join('   ·   ');
-    ctx.fillText(caption, 22, 43);
+    ctx.fillText(sliceCaption(index, slices.length, slice), 22, 43);
 
     ctx.strokeStyle = style.border;
     ctx.lineWidth = 1;

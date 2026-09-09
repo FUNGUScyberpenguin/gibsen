@@ -15,8 +15,7 @@ import { iconFor } from '../model/icons';
 import { condenseLabel, wrapLabel } from './label';
 import { hasDeeperRecord } from '../model/record';
 import type { Theme } from './theme';
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
+import { DOM_SVG_DOC, serialiseNode, StringSvgDoc, SVG_NS, type SvgDoc, type SvgNode } from './svg-doc';
 
 const SANS = 'ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
@@ -43,19 +42,24 @@ export interface RenderOptions {
 
 type Attrs = Record<string, string | number | undefined | null>;
 
-function el<K extends keyof SVGElementTagNameMap>(
-  tag: K,
-  attrs: Attrs = {},
-  ...children: (Node | string)[]
-): SVGElementTagNameMap[K] {
-  const node = document.createElementNS(SVG_NS, tag);
+/**
+ * Where `el` puts the elements it makes.
+ *
+ * Module state, which is worth a word. Drawing is one synchronous pass with no
+ * awaits in it, so the only alternative — threading a document argument through
+ * every one of the eighty `el` calls below — buys nothing but noise. The two
+ * entry points at the bottom set this before they build and are the only
+ * writers.
+ */
+let doc: SvgDoc = DOM_SVG_DOC;
+
+function el(tag: string, attrs: Attrs = {}, ...children: (SvgNode | string)[]): SvgNode {
+  const node = doc.create(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === null) continue;
     node.setAttribute(k, String(v));
   }
-  for (const child of children) {
-    node.append(typeof child === 'string' ? document.createTextNode(child) : child);
-  }
+  node.append(...children);
   return node;
 }
 
@@ -78,18 +82,42 @@ function nodeAccent(placed: PositionedNode, theme: Theme): string {
   return PLANE_BY_ID[placed.plane]?.accent ?? theme.textMuted;
 }
 
-export function renderDiagram(incident: Incident, result: LayoutResult, options: RenderOptions): SVGSVGElement {
+/** Where the diagram's edges land, and where the drawing area starts. */
+export interface DiagramSize {
+  width: number;
+  height: number;
+  /** Height of the title block above the diagram body; 0 when it is off. */
+  topOffset: number;
+  /** Width of the plane-name gutter down the left edge. */
+  gutterWidth: number;
+}
+
+/**
+ * The size the diagram will come out at, without drawing it. Anything that has
+ * to place the picture — a PDF page, a slide — needs the numbers before the
+ * markup exists, and taking them from anywhere but here invites a mismatch.
+ */
+export function diagramSize(incident: Incident, result: LayoutResult, options: RenderOptions): DiagramSize {
+  const showTitle = options.showTitle ?? true;
+  const showLegend = options.showLegend ?? true;
+  const topOffset = showTitle ? TITLE_H : 0;
+  const legendRows = 4 + (incident.nodes.some((n) => n.tactic) ? 1 : 0);
+  const legendHeight = showLegend ? LEGEND_ROW_H * legendRows + 30 : 0;
+  return {
+    width: Math.max(result.width, 620),
+    height: topOffset + result.height + legendHeight,
+    topOffset,
+    gutterWidth: GUTTER_W,
+  };
+}
+
+function build(incident: Incident, result: LayoutResult, options: RenderOptions): SvgNode {
   const { theme } = options;
   const showTitle = options.showTitle ?? true;
   const showLegend = options.showLegend ?? true;
   const showEdgeLabels = options.showEdgeLabels ?? true;
 
-  const topOffset = showTitle ? TITLE_H : 0;
-  // planes, confidence, behaviour, markers — plus a tactics line when earned.
-  const legendRows = 4 + (incident.nodes.some((n) => n.tactic) ? 1 : 0);
-  const legendHeight = showLegend ? LEGEND_ROW_H * legendRows + 30 : 0;
-  const totalWidth = Math.max(result.width, 620);
-  const totalHeight = topOffset + result.height + legendHeight;
+  const { width: totalWidth, height: totalHeight, topOffset } = diagramSize(incident, result, options);
 
   const svg = el('svg', {
     xmlns: SVG_NS,
@@ -634,7 +662,7 @@ function renderLegend(
   options: RenderOptions,
   /** Whether any box was actually given a "more in the record" marker. */
   anyRecordMarkers: boolean,
-): SVGGElement {
+): SvgNode {
   const group = el('g', { transform: `translate(0, ${y})` });
   group.append(el('line', { x1: 0, y1: 8, x2: width, y2: 8, stroke: theme.grid, 'stroke-width': 1 }));
 
@@ -779,4 +807,35 @@ function renderLegend(
   }
 
   return group;
+}
+
+/**
+ * Draw into the live DOM. What the studio calls, and what the SVG, PNG, slide
+ * and interactive-page exports all hang off.
+ */
+export function renderDiagram(incident: Incident, result: LayoutResult, options: RenderOptions): SVGSVGElement {
+  doc = DOM_SVG_DOC;
+  return build(incident, result, options) as unknown as SVGSVGElement;
+}
+
+/**
+ * Draw to markup, with no DOM in sight. This is the door the server renderer
+ * comes in through: same geometry, same colours, same text fitting, because it
+ * is the same code with a different document under it.
+ *
+ * `data-node-id` hooks are app state rather than diagram content, so they are
+ * off unless `interactive` asks for them — the interactive HTML export is built
+ * on those attributes and does want them.
+ */
+export function renderDiagramMarkup(
+  incident: Incident,
+  result: LayoutResult,
+  options: RenderOptions,
+): string {
+  doc = new StringSvgDoc();
+  try {
+    return serialiseNode(build(incident, result, options));
+  } finally {
+    doc = DOM_SVG_DOC;
+  }
 }
