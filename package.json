@@ -3,21 +3,36 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser-based studio for turning cyber threat intelligence into GIBSEN diagrams",
+  "description": "Browser-based studio and headless renderer for turning cyber threat intelligence into GIBSEN diagrams",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:server": "tsc --noEmit && vite build --config vite.server.config.ts",
     "preview": "vite preview",
+    "mcp": "npm run build:server && node dist-server/gibsen-mcp.js",
+    "render": "node dist-server/gibsen-render.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^22.20.2",
     "typescript": "^5.6.3",
     "vite": "^8.2.1",
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.2.108"
-  }
+  },
+  "bin": {
+    "gibsen-mcp": "./dist-server/gibsen-mcp.js",
+    "gibsen-render": "./dist-server/gibsen-render.js"
+  },
+  "files": [
+    "dist-server",
+    "README.md"
+  ]
 }
