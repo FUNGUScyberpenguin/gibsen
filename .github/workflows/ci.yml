@@ -26,3 +26,6 @@ jobs:
 
       - name: Build
         run: npx vite build
+
+      - name: Build the MCP server and CLI
+        run: npx vite build --config vite.server.config.ts

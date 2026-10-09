@@ -42,9 +42,10 @@ walkthrough included — that you can send to somebody.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm test         # unit tests
-npm run build    # static site in dist/
+npm run dev            # http://localhost:5173
+npm test               # unit tests
+npm run build          # static site in dist/
+npm run build:server   # MCP server and CLI in dist-server/
 ```
 
 ---
@@ -450,7 +451,9 @@ artifact is dropped.
 | **Markdown** | **The narrative first** — the walkthrough written down, numbered, grouped under act headings, with the elapsed time between beats — then the timeline, behaviours, points of congruence, per-artifact detail with logs and commentary, and a copy-pasteable indicator appendix |
 
 The on-screen diagram and the exported file are produced by the same renderer,
-so they cannot drift apart.
+so they cannot drift apart. **PDF is not in that list**, because it is not a
+browser export — it comes from the headless renderer, along with everything
+above it. See [Driving it from Claude](#driving-it-from-claude).
 
 ### The interactive page
 
@@ -497,6 +500,93 @@ in a deck that is continuity rather than repetition.
 
 ---
 
+## Driving it from Claude
+
+The studio needs a browser. The same renderer also runs headless, behind an MCP
+server and a command line, so a diagram can be produced without one — hand
+Claude a threat report and get a PDF and a PNG back.
+
+```bash
+npm install
+npm run build:server
+```
+
+That writes two executables to `dist-server/`.
+
+### The MCP server
+
+Point an MCP client at `dist-server/gibsen-mcp.js`. For Claude Code:
+
+```bash
+claude mcp add gibsen -- node /absolute/path/to/gibsen/dist-server/gibsen-mcp.js
+```
+
+For Claude Desktop, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "gibsen": {
+      "command": "node",
+      "args": ["/absolute/path/to/gibsen/dist-server/gibsen-mcp.js"]
+    }
+  }
+}
+```
+
+Four tools:
+
+| Tool | What it does |
+| --- | --- |
+| `gibsen_schema` | The incident format, every legal plane, category, relation and tactic, and a guide to writing one that reads well. Read it before authoring |
+| `gibsen_ingest` | Runs a STIX bundle, MISP event, CSV table or report through the studio's own parsers, for a draft to correct |
+| `gibsen_validate` | Unknown vocabulary, edges pointing at nothing, unparseable timestamps, and the things that will draw but say little |
+| `gibsen_render` | Draws it. Writes PDF, PNG, one PNG per act, SVG, the interactive page, the Markdown report and the incident JSON |
+
+**Note what is not a tool: anything that reads intelligence and decides what the
+artifacts are.** The narrative parser in `ingest/text.ts` is regex work, and the
+caveat below is honest about it. A model reading the same report knows which
+process wrote which file and why, which is the judgement the regexes cannot
+make. So the model writes the incident and the server draws it. `gibsen_schema`
+is what makes that work: it hands over the vocabularies and the rules of thumb
+that separate a legal incident from a readable one.
+
+In practice the exchange is short. Paste a report, ask for a diagram, and Claude
+calls `gibsen_schema`, writes the incident, calls `gibsen_validate`, fixes what
+comes back, then calls `gibsen_render`.
+
+### The command line
+
+```bash
+node dist-server/gibsen-render.js incident.gibsen.json --out ./out
+node dist-server/gibsen-render.js report.md --out ./out --formats pdf,png --theme light
+```
+
+It takes a saved incident or anything the studio can read, validates before it
+draws, and refuses an incident with errors in it. `--help` lists the rest.
+
+### The PDF
+
+One landscape page per act, each carrying the plane gutter so it reads on its
+own, behind a contents sheet listing the acts and how long each ran. It is the
+same cut the Slides export makes, deliberately — a deck and a printed report of
+the same incident should not break the story in different places.
+
+An incident whose artifacts carry no ATT&CK tactics cannot be cut into acts, and
+comes out as a single page holding the whole diagram. The renderer says so in
+its warnings rather than quietly producing one enormous sheet.
+
+### Fonts
+
+The diagram asks for a font stack — Segoe UI, then Helvetica Neue, then Arial,
+then whatever counts as sans-serif. A Mac or a Windows machine resolves that
+early. A bare Linux container resolves none of it, so install a set of metric
+compatible fonts (`fonts-liberation` on Debian and Ubuntu) or the labels come
+out in the wrong widths. `--help` has no switch for this; the MCP tool takes
+font family names if you need to override them.
+
+---
+
 ## Editing
 
 Click any artifact to open the inspector: rename it, move it between planes,
@@ -535,13 +625,23 @@ src/
   export/      SVG/PNG/slides/JSON download, Markdown report, interactive page
   ui/          DOM helpers, inspector panel
   main.ts      app shell: state, uploads, zoom/pan, selection
+server/        headless side: MCP server, CLI, PNG/PDF writing, the
+               authoring contract handed to a model
 samples/       the sample documents (also used by the tests)
 test/          unit tests
 ```
 
 Adding an artifact category means editing `taxonomy.ts` and adding a glyph to
 `icons.ts`. Adding a plane set is a few lines in `PLANE_SETS`. Every parser, the
-layout, the renderer and the inspector pick both up without further changes.
+layout, the renderer, the inspector and the schema the MCP server hands out pick
+both up without further changes.
+
+The renderer builds its SVG through a two-line interface rather than calling
+`document` directly (`render/svg-doc.ts`). In the browser that interface makes
+live elements, because the app wires clicks to them and the walkthrough measures
+them; on the server it makes markup. One drawing pass, one set of geometry, so a
+picture made in the studio and a picture made by the MCP server are the same
+picture.
 
 ## Deploying
 

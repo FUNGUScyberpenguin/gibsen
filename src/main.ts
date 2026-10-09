@@ -19,6 +19,7 @@ import { renderDiagram } from './render/diagram';
 import { findChokePoints, type ChokePoint } from './analysis/congruence';
 import { themeByName } from './render/theme';
 import { exportInteractive, exportJson, exportMarkdown, exportPng, exportSlices, exportSvg } from './export/download';
+import { actSlices } from './export/slices';
 import { renderInspector, type Selection } from './ui/inspector';
 import { closeRecord, openRecord, recordIsOpen } from './ui/modal';
 import { Walkthrough } from './ui/walkthrough';
@@ -793,12 +794,7 @@ async function runExport(kind: string): Promise<void> {
       case 'slides': {
         // One image per act. A whole incident is one enormous wide picture
         // that nobody can put on a slide; an act is a picture of one phase.
-        const slices = result.acts.map((act) => ({
-          name: act.label,
-          subtitle: [act.from?.replace('.000Z', 'Z'), act.duration].filter(Boolean).join('  ·  '),
-          x: act.x,
-          width: act.width,
-        }));
+        const slices = actSlices(result.acts);
         if (!slices.length) {
           setStatus('No acts to cut on — the artifacts need ATT&CK tactics first. Exporting one PNG instead.');
           await exportPng(clean, state.incident, 2);
